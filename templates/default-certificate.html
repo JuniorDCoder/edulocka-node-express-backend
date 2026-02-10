@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Certificate — {{certId}}</title>
+  <style>
+    /* ── Reset ─────────────────────────────────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    @page {
+      size: A4 landscape;
+      margin: 0;
+    }
+
+    body {
+      width: 297mm;
+      height: 210mm;
+      font-family: 'Georgia', 'Times New Roman', serif;
+      background: #ffffff;
+      color: #1a1a2e;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* ── Certificate Frame ────────────────────────────────────────────── */
+    .certificate {
+      width: 277mm;
+      height: 190mm;
+      position: relative;
+      background: linear-gradient(135deg, #fefefe 0%, #f8f6f0 100%);
+      border: 3px solid #1a1a2e;
+      padding: 20mm;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    /* Decorative double border */
+    .certificate::before {
+      content: '';
+      position: absolute;
+      top: 4mm;
+      left: 4mm;
+      right: 4mm;
+      bottom: 4mm;
+      border: 1.5px solid #c5a55a;
+      pointer-events: none;
+    }
+
+    /* Corner ornaments */
+    .corner { position: absolute; width: 30mm; height: 30mm; }
+    .corner svg { width: 100%; height: 100%; }
+    .corner-tl { top: 6mm; left: 6mm; }
+    .corner-tr { top: 6mm; right: 6mm; transform: scaleX(-1); }
+    .corner-bl { bottom: 6mm; left: 6mm; transform: scaleY(-1); }
+    .corner-br { bottom: 6mm; right: 6mm; transform: scale(-1); }
+
+    /* ── Header ───────────────────────────────────────────────────────── */
+    .header {
+      text-align: center;
+      z-index: 1;
+    }
+
+    .institution-name {
+      font-size: 16pt;
+      font-weight: 700;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #1a1a2e;
+      margin-bottom: 4mm;
+    }
+
+    .divider {
+      width: 80mm;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, #c5a55a, transparent);
+      margin: 3mm auto;
+    }
+
+    .certificate-title {
+      font-size: 28pt;
+      font-weight: 400;
+      letter-spacing: 6px;
+      text-transform: uppercase;
+      color: #c5a55a;
+      margin: 4mm 0 2mm;
+    }
+
+    .subtitle {
+      font-size: 10pt;
+      color: #555;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    /* ── Body ─────────────────────────────────────────────────────────── */
+    .body {
+      text-align: center;
+      z-index: 1;
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .presented-to {
+      font-size: 11pt;
+      color: #666;
+      letter-spacing: 2px;
+      margin-bottom: 4mm;
+    }
+
+    .student-name {
+      font-size: 26pt;
+      font-weight: 700;
+      color: #1a1a2e;
+      border-bottom: 2px solid #c5a55a;
+      padding-bottom: 3mm;
+      margin-bottom: 5mm;
+      min-width: 120mm;
+      display: inline-block;
+    }
+
+    .degree {
+      font-size: 14pt;
+      font-style: italic;
+      color: #333;
+      margin-bottom: 2mm;
+    }
+
+    .description {
+      font-size: 10pt;
+      color: #666;
+      max-width: 180mm;
+      line-height: 1.6;
+    }
+
+    /* ── Footer ───────────────────────────────────────────────────────── */
+    .footer {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      z-index: 1;
+    }
+
+    .footer-col {
+      text-align: center;
+      min-width: 60mm;
+    }
+
+    .signature-line {
+      width: 55mm;
+      height: 1px;
+      background: #1a1a2e;
+      margin: 0 auto 2mm;
+    }
+
+    .footer-label {
+      font-size: 8pt;
+      color: #888;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+    }
+
+    .footer-value {
+      font-size: 9pt;
+      color: #333;
+      font-weight: 600;
+      margin-bottom: 1mm;
+    }
+
+    /* ── QR Code (bottom-right) ───────────────────────────────────────── */
+    .qr-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-width: 35mm;
+    }
+
+    .qr-code img {
+      width: 22mm;
+      height: 22mm;
+      border: 1px solid #e0e0e0;
+      padding: 1mm;
+      background: white;
+    }
+
+    .qr-label {
+      font-size: 6pt;
+      color: #999;
+      margin-top: 1mm;
+      letter-spacing: 0.5px;
+    }
+
+    .cert-id {
+      font-size: 7pt;
+      font-family: 'Courier New', monospace;
+      color: #aaa;
+      margin-top: 0.5mm;
+    }
+
+    /* ── Blockchain badge ─────────────────────────────────────────────── */
+    .blockchain-badge {
+      position: absolute;
+      top: 8mm;
+      right: 10mm;
+      font-size: 6pt;
+      color: #c5a55a;
+      border: 1px solid #c5a55a;
+      padding: 1mm 3mm;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      font-family: system-ui, sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <div class="certificate">
+    <!-- Blockchain verified badge -->
+    <div class="blockchain-badge">⛓ Blockchain Verified</div>
+
+    <!-- Corner ornaments (simple L-shapes) -->
+    <div class="corner corner-tl">
+      <svg viewBox="0 0 100 100" fill="none" stroke="#c5a55a" stroke-width="1.5">
+        <path d="M5 40 L5 5 L40 5" /><path d="M10 35 L10 10 L35 10" />
+      </svg>
+    </div>
+    <div class="corner corner-tr">
+      <svg viewBox="0 0 100 100" fill="none" stroke="#c5a55a" stroke-width="1.5">
+        <path d="M5 40 L5 5 L40 5" /><path d="M10 35 L10 10 L35 10" />
+      </svg>
+    </div>
+    <div class="corner corner-bl">
+      <svg viewBox="0 0 100 100" fill="none" stroke="#c5a55a" stroke-width="1.5">
+        <path d="M5 40 L5 5 L40 5" /><path d="M10 35 L10 10 L35 10" />
+      </svg>
+    </div>
+    <div class="corner corner-br">
+      <svg viewBox="0 0 100 100" fill="none" stroke="#c5a55a" stroke-width="1.5">
+        <path d="M5 40 L5 5 L40 5" /><path d="M10 35 L10 10 L35 10" />
+      </svg>
+    </div>
+
+    <!-- Header -->
+    <div class="header">
+      <div class="institution-name">{{institution}}</div>
+      <div class="divider"></div>
+      <div class="certificate-title">Certificate</div>
+      <div class="subtitle">of Achievement</div>
+    </div>
+
+    <!-- Body -->
+    <div class="body">
+      <div class="presented-to">THIS IS PROUDLY PRESENTED TO</div>
+      <div class="student-name">{{studentName}}</div>
+      <div class="degree">{{degree}}</div>
+      <div class="description">
+        for the successful completion of all academic requirements as prescribed by the faculty
+        and board of {{institution}}, conferred on {{formatDate issueDate}}.
+      </div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer">
+      <div class="footer-col">
+        <div class="footer-value">{{formatDate issueDate}}</div>
+        <div class="signature-line"></div>
+        <div class="footer-label">Date of Issue</div>
+      </div>
+
+      <div class="footer-col">
+        <div class="footer-value">{{studentId}}</div>
+        <div class="signature-line"></div>
+        <div class="footer-label">Student ID</div>
+      </div>
+
+      <div class="qr-section">
+        <div class="qr-code">
+          <img src="{{qrDataUrl}}" alt="Verify QR Code" />
+        </div>
+        <div class="qr-label">Scan to Verify</div>
+        <div class="cert-id">{{certId}}</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,6 @@
+studentName,studentId,degree,institution,issueDate,email
+Alice Johnson,STU-2026-001,Bachelor of Science in Computer Science,Massachusetts Institute of Technology,2026-06-15,alice@example.com
+Bob Smith,STU-2026-002,Master of Business Administration,Harvard University,2026-06-15,bob@example.com
+Carol Williams,STU-2026-003,Bachelor of Arts in Economics,Stanford University,2026-06-15,carol@example.com
+David Brown,STU-2026-004,Master of Science in Data Science,MIT,2026-06-15,david@example.com
+Eva Martinez,STU-2026-005,Bachelor of Engineering in Electrical Engineering,Caltech,2026-06-15,eva@example.com

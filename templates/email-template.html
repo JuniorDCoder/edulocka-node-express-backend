@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Your Certificate is Ready</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f5f7;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);padding:36px 40px;text-align:center;">
+              <h1 style="color:#ffffff;font-size:24px;font-weight:700;margin:0 0 8px;letter-spacing:1px;">🎓 Edulocka</h1>
+              <p style="color:#c5a55a;font-size:13px;margin:0;letter-spacing:2px;text-transform:uppercase;">Blockchain Certificate Verification</p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:36px 40px;">
+              <!-- Greeting -->
+              <p style="font-size:16px;color:#333;margin:0 0 20px;">
+                Dear <strong style="color:#1a1a2e;">{{studentName}}</strong>,
+              </p>
+
+              <p style="font-size:15px;color:#555;line-height:1.7;margin:0 0 24px;">
+                Congratulations! Your academic certificate has been officially issued and permanently recorded on the blockchain. This certificate is immutable and can be verified by anyone, anywhere, at any time.
+              </p>
+
+              <!-- Certificate Details Card -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f8f9fb;border-radius:8px;border:1px solid #e8eaed;margin:0 0 24px;">
+                <tr>
+                  <td style="padding:24px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                      <tr>
+                        <td style="padding:6px 0;">
+                          <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;">Certificate ID</span><br/>
+                          <span style="font-size:14px;color:#1a1a2e;font-family:'Courier New',monospace;font-weight:600;">{{certId}}</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;">
+                          <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;">Degree / Program</span><br/>
+                          <span style="font-size:14px;color:#1a1a2e;font-weight:600;">{{degree}}</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;">
+                          <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;">Institution</span><br/>
+                          <span style="font-size:14px;color:#1a1a2e;font-weight:600;">{{institution}}</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;">
+                          <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;">Date of Issue</span><br/>
+                          <span style="font-size:14px;color:#1a1a2e;font-weight:600;">{{issueDate}}</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- QR Code -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;">
+                <tr>
+                  <td align="center">
+                    <p style="font-size:12px;color:#888;margin:0 0 8px;letter-spacing:1px;text-transform:uppercase;">Scan to Verify</p>
+                    <img src="cid:qrcode" alt="Verification QR Code" width="150" height="150" style="border:1px solid #e8eaed;border-radius:4px;padding:4px;background:#fff;" />
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Verify Button -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;">
+                <tr>
+                  <td align="center">
+                    <a href="{{verifyUrl}}" style="display:inline-block;background:#1a1a2e;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:14px 36px;border-radius:6px;letter-spacing:0.5px;">
+                      Verify Certificate Online →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="font-size:13px;color:#888;line-height:1.6;margin:0 0 16px;">
+                Your certificate PDF is attached to this email. You can also share the verification link above with employers, institutions, or anyone who needs to confirm your credentials.
+              </p>
+
+              <!-- Blockchain Info -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f0fdf4;border-radius:6px;border:1px solid #bbf7d0;margin:0 0 20px;">
+                <tr>
+                  <td style="padding:16px;">
+                    <p style="font-size:12px;color:#166534;margin:0;font-weight:600;">
+                      ⛓ Recorded on Blockchain
+                    </p>
+                    <p style="font-size:11px;color:#15803d;margin:4px 0 0;line-height:1.5;">
+                      This certificate has been permanently and immutably recorded on the blockchain. It cannot be altered, forged, or deleted by anyone — not even the issuing institution.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f8f9fb;padding:24px 40px;border-top:1px solid #e8eaed;">
+              <p style="font-size:12px;color:#999;text-align:center;margin:0 0 8px;">
+                This is an automated email from Edulocka — Blockchain Certificate Verification System
+              </p>
+              <p style="font-size:11px;color:#bbb;text-align:center;margin:0;">
+                © {{currentYear}} Edulocka. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
