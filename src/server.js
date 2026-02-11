@@ -35,10 +35,67 @@ dirs.forEach((dir) => {
 
 // ── MongoDB Connection ──────────────────────────────────────────────────────
 const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/edulocka";
-mongoose
-  .connect(MONGODB_URI)
-  .then(() => console.log("✅ MongoDB connected:", MONGODB_URI))
-  .catch((err) => console.warn("⚠️  MongoDB not available:", err.message, "— institution features will be limited"));
+const MONGODB_RETRY_DELAY_MS = Math.max(
+  1000,
+  parseInt(process.env.MONGODB_RETRY_DELAY_MS || "5000", 10) || 5000
+);
+let mongoConnectPromise = null;
+let mongoRetryTimer = null;
+
+function mongoStateLabel() {
+  switch (mongoose.connection.readyState) {
+    case 1:
+      return "connected";
+    case 2:
+      return "connecting";
+    case 3:
+      return "disconnecting";
+    default:
+      return "disconnected";
+  }
+}
+
+async function connectMongo() {
+  if (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2) return;
+  if (mongoConnectPromise) return mongoConnectPromise;
+
+  mongoConnectPromise = mongoose
+    .connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 10000,
+    })
+    .then(() => {
+      console.log("✅ MongoDB connected:", MONGODB_URI);
+    })
+    .catch((err) => {
+      console.warn("⚠️  MongoDB connection failed:", err.message);
+      scheduleMongoReconnect("initial connection failure");
+    })
+    .finally(() => {
+      mongoConnectPromise = null;
+    });
+
+  return mongoConnectPromise;
+}
+
+function scheduleMongoReconnect(reason) {
+  if (mongoRetryTimer) return;
+  console.warn(`⚠️  Scheduling MongoDB reconnect in ${MONGODB_RETRY_DELAY_MS}ms (${reason}).`);
+  mongoRetryTimer = setTimeout(() => {
+    mongoRetryTimer = null;
+    void connectMongo();
+  }, MONGODB_RETRY_DELAY_MS);
+}
+
+mongoose.connection.on("disconnected", () => {
+  scheduleMongoReconnect("connection dropped");
+});
+
+mongoose.connection.on("error", (err) => {
+  console.warn("⚠️  MongoDB connection error:", err.message);
+  scheduleMongoReconnect("connection error");
+});
+
+void connectMongo();
 
 // ── Middleware ───────────────────────────────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
@@ -79,7 +136,11 @@ app.use("/api/admin", adminRoutes);
 
 // Health check
 app.get("/health", (req, res) => {
-  res.json({ status: "ok", timestamp: new Date().toISOString() });
+  res.json({
+    status: "ok",
+    db: mongoStateLabel(),
+    timestamp: new Date().toISOString(),
+  });
 });
 
 // ── Error handler ───────────────────────────────────────────────────────────
