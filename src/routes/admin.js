@@ -7,6 +7,7 @@ const express = require("express");
 const router = express.Router();
 
 const adminController = require("../controllers/adminController");
+const blogController = require("../controllers/blogController");
 const { requireAdminAuth } = require("../middleware/adminMiddleware");
 
 // All admin routes require authentication
@@ -45,5 +46,11 @@ router.post("/deauthorize/:address", adminController.deauthorizeInstitution);
 
 // ── Dashboard Stats ─────────────────────────────────────────────────────────
 router.get("/stats", adminController.getStats);
+
+// ── Blog Management ─────────────────────────────────────────────────────────
+router.get("/blogs", blogController.listBlogsForAdmin);
+router.get("/blog-logs", blogController.listBlogAuditLogs);
+router.post("/blogs/:id/review", blogController.reviewBlog);
+router.delete("/blogs/:id", blogController.deleteBlog);
 
 module.exports = router;

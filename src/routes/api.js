@@ -9,7 +9,9 @@ const router = express.Router();
 
 const bulkController = require("../controllers/bulkController");
 const certificateController = require("../controllers/certificateController");
+const blogController = require("../controllers/blogController");
 const { requireWalletAuth, optionalWalletAuth } = require("../middleware/authMiddleware");
+const { requireAdminAuth } = require("../middleware/adminMiddleware");
 
 // ── File upload config ──────────────────────────────────────────────────────
 const storage = multer.diskStorage({
@@ -77,6 +79,25 @@ router.get("/bulk/status/:jobId", bulkController.getJobStatus);
 
 // Download all generated certificates for a job as ZIP
 router.get("/bulk/download/:jobId", bulkController.downloadBatch);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BLOG ENDPOINTS
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Writer routes (wallet auth required)
+router.get("/blogs/my", requireWalletAuth, blogController.listMyBlogs);
+router.get("/blogs/my/:id", requireWalletAuth, blogController.getMyBlogById);
+router.post("/blogs", requireWalletAuth, blogController.createBlog);
+router.put("/blogs/:id", requireWalletAuth, blogController.updateBlog);
+router.delete("/blogs/:id", requireWalletAuth, blogController.deleteBlog);
+
+// Admin moderation routes
+router.get("/blogs/pending-review", requireAdminAuth, blogController.listPendingReviewBlogs);
+router.post("/blogs/:id/review", requireAdminAuth, blogController.reviewBlog);
+
+// Public blog feed + detail (published only)
+router.get("/blogs", blogController.listPublishedBlogs);
+router.get("/blogs/:slug", blogController.getPublishedBlog);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CERTIFICATE TEMPLATE ENDPOINTS
