@@ -41,8 +41,10 @@ const MONGODB_RETRY_DELAY_MS = Math.max(
 );
 let mongoConnectPromise = null;
 let mongoRetryTimer = null;
+let mongoRetryDisabled = false;
 
 function mongoStateLabel() {
+  if (mongoRetryDisabled) return "auth_failed";
   switch (mongoose.connection.readyState) {
     case 1:
       return "connected";
@@ -55,7 +57,22 @@ function mongoStateLabel() {
   }
 }
 
+function isPermanentMongoError(err) {
+  const message = String(err?.message || "").toLowerCase();
+  const name = String(err?.name || "").toLowerCase();
+  const code = Number(err?.code);
+
+  return (
+    code === 18 ||
+    name.includes("mongoauthenticationerror") ||
+    message.includes("authentication failed") ||
+    message.includes("bad auth") ||
+    message.includes("auth failed")
+  );
+}
+
 async function connectMongo() {
+  if (mongoRetryDisabled) return;
   if (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2) return;
   if (mongoConnectPromise) return mongoConnectPromise;
 
@@ -68,6 +85,11 @@ async function connectMongo() {
     })
     .catch((err) => {
       console.warn("⚠️  MongoDB connection failed:", err.message);
+      if (isPermanentMongoError(err)) {
+        mongoRetryDisabled = true;
+        console.error("❌ MongoDB authentication failed. Disable retries until config is fixed and service restarts.");
+        return;
+      }
       scheduleMongoReconnect("initial connection failure");
     })
     .finally(() => {
@@ -78,6 +100,7 @@ async function connectMongo() {
 }
 
 function scheduleMongoReconnect(reason) {
+  if (mongoRetryDisabled) return;
   if (mongoRetryTimer) return;
   console.warn(`⚠️  Scheduling MongoDB reconnect in ${MONGODB_RETRY_DELAY_MS}ms (${reason}).`);
   mongoRetryTimer = setTimeout(() => {
@@ -87,11 +110,17 @@ function scheduleMongoReconnect(reason) {
 }
 
 mongoose.connection.on("disconnected", () => {
+  if (mongoRetryDisabled) return;
   scheduleMongoReconnect("connection dropped");
 });
 
 mongoose.connection.on("error", (err) => {
   console.warn("⚠️  MongoDB connection error:", err.message);
+  if (isPermanentMongoError(err)) {
+    mongoRetryDisabled = true;
+    console.error("❌ MongoDB authentication failed. Disable retries until config is fixed and service restarts.");
+    return;
+  }
   scheduleMongoReconnect("connection error");
 });
 
