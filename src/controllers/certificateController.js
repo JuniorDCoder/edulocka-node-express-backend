@@ -5,6 +5,7 @@
 const path = require("path");
 const fs = require("fs");
 const archiver = require("archiver");
+const crypto = require("crypto");
 
 const blockchainService = require("../services/blockchainService");
 const ipfsService = require("../services/ipfsService");
@@ -14,6 +15,45 @@ const emailService = require("../services/emailService");
 const { validateCertificate } = require("../utils/validator");
 
 const TEMPLATES_DIR = path.join(__dirname, "..", "..", "templates");
+
+function sha256Hex(buffer) {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
+async function fetchBufferWithTimeout(url, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, { signal: controller.signal });
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const bytes = await res.arrayBuffer();
+    return Buffer.from(bytes);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchIpfsDocument(ipfsHash) {
+  const candidates = [
+    ipfsService.getGatewayUrl(ipfsHash),
+    `https://ipfs.io/ipfs/${ipfsHash}`,
+    `https://cloudflare-ipfs.com/ipfs/${ipfsHash}`,
+  ].filter((v, i, arr) => arr.indexOf(v) === i);
+
+  const errors = [];
+  for (const url of candidates) {
+    try {
+      const buffer = await fetchBufferWithTimeout(url);
+      return { buffer, url };
+    } catch (err) {
+      errors.push(`${url} -> ${err.message}`);
+    }
+  }
+
+  throw new Error(`Unable to fetch IPFS document from gateways. ${errors.join(" | ")}`);
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SINGLE CERTIFICATE ISSUANCE
@@ -48,12 +88,13 @@ async function issueSingle(req, res) {
       ...cert,
       certId,
     });
+    const documentHash = ipfsService.computeContentHash(pdfResult.buffer);
 
     // Upload PDF to IPFS
     const ipfsResult = await ipfsService.uploadBuffer(
       pdfResult.buffer,
       pdfResult.fileName,
-      { certId, type: "certificate" }
+      { certId, type: "certificate", documentHash }
     );
 
     // Issue on blockchain
@@ -96,6 +137,7 @@ async function issueSingle(req, res) {
       },
       ipfs: {
         hash: ipfsResult.ipfsHash,
+        documentHash,
         pinned: ipfsResult.pinned,
         gateway: ipfsResult.gateway,
       },
@@ -143,6 +185,105 @@ async function verifyCertificate(req, res) {
     });
   } catch (err) {
     console.error("Verify error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// VERIFY UPLOADED CERTIFICATE DOCUMENT
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/certificates/verify-file
+// multipart/form-data: { certId, document }
+
+async function verifyCertificateDocument(req, res) {
+  try {
+    const certId = String(req.body.certId || "").trim();
+    if (!certId) {
+      return res.status(400).json({ error: "certId is required" });
+    }
+    if (!req.file || !req.file.buffer) {
+      return res.status(400).json({ error: "document file is required" });
+    }
+
+    const certificate = await blockchainService.verifyCertificate(certId);
+    if (!certificate.exists) {
+      return res.status(404).json({
+        exists: false,
+        message: `Certificate \"${certId}\" not found on blockchain`,
+      });
+    }
+
+    if (!certificate.ipfsHash) {
+      return res.status(409).json({
+        exists: true,
+        certId,
+        error: "Certificate has no on-chain IPFS hash to compare against",
+      });
+    }
+
+    const uploadedBuffer = req.file.buffer;
+    const uploadedSha256 = sha256Hex(uploadedBuffer);
+
+    let ipfsDoc;
+    try {
+      ipfsDoc = await fetchIpfsDocument(certificate.ipfsHash);
+    } catch (err) {
+      return res.status(502).json({
+        exists: true,
+        certId,
+        uploaded: {
+          fileName: req.file.originalname,
+          mimeType: req.file.mimetype,
+          size: uploadedBuffer.length,
+          sha256: uploadedSha256,
+        },
+        ipfs: {
+          hash: certificate.ipfsHash,
+        },
+        error: err.message,
+      });
+    }
+
+    const ipfsSha256 = sha256Hex(ipfsDoc.buffer);
+    const hashMatch = uploadedSha256 === ipfsSha256;
+    const exactBytesMatch =
+      hashMatch &&
+      uploadedBuffer.length === ipfsDoc.buffer.length &&
+      uploadedBuffer.equals(ipfsDoc.buffer);
+
+    res.json({
+      exists: true,
+      certId,
+      certificate: {
+        isValid: certificate.isValid,
+        studentName: certificate.studentName,
+        degree: certificate.degree,
+        institution: certificate.institution,
+        issueDate: certificate.issueDate,
+        issuer: certificate.issuer,
+        ipfsHash: certificate.ipfsHash,
+      },
+      uploaded: {
+        fileName: req.file.originalname,
+        mimeType: req.file.mimetype,
+        size: uploadedBuffer.length,
+        sha256: uploadedSha256,
+      },
+      ipfs: {
+        hash: certificate.ipfsHash,
+        gatewayUrl: ipfsDoc.url,
+        size: ipfsDoc.buffer.length,
+        sha256: ipfsSha256,
+      },
+      match: {
+        sha256: hashMatch,
+        exactBytes: exactBytesMatch,
+      },
+      verified: certificate.isValid && hashMatch,
+      verifyUrl: qrService.getVerifyUrl(certId),
+    });
+  } catch (err) {
+    console.error("Verify document error:", err);
     res.status(500).json({ error: err.message });
   }
 }
@@ -400,6 +541,7 @@ async function bulkSendEmails(req, res) {
 module.exports = {
   issueSingle,
   verifyCertificate,
+  verifyCertificateDocument,
   generatePDF,
   uploadTemplate,
   listTemplates,

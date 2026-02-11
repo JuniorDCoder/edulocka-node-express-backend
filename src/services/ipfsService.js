@@ -11,6 +11,10 @@ const crypto = require("crypto");
 const PINATA_JWT = process.env.PINATA_JWT;
 const PINATA_GATEWAY = process.env.PINATA_GATEWAY || "https://gateway.pinata.cloud";
 
+function computeContentHash(buffer) {
+  return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
 function isPinataConfigured() {
   return (
     PINATA_JWT &&
@@ -24,7 +28,7 @@ function isPinataConfigured() {
 async function uploadBuffer(buffer, fileName, metadata = {}) {
   if (!isPinataConfigured()) {
     // Fallback: SHA-256 content hash (acts as a unique identifier)
-    const hash = crypto.createHash("sha256").update(buffer).digest("hex");
+    const hash = computeContentHash(buffer);
     const cidHash = "Qm" + hash.slice(0, 44);
     return {
       ipfsHash: cidHash,
@@ -82,10 +86,7 @@ async function uploadFile(filePath, metadata = {}) {
 
 async function uploadJSON(jsonData, name = "metadata.json") {
   if (!isPinataConfigured()) {
-    const hash = crypto
-      .createHash("sha256")
-      .update(JSON.stringify(jsonData))
-      .digest("hex");
+    const hash = computeContentHash(Buffer.from(JSON.stringify(jsonData)));
     return {
       ipfsHash: "Qm" + hash.slice(0, 44),
       pinned: false,
@@ -125,6 +126,7 @@ function getGatewayUrl(ipfsHash) {
 }
 
 module.exports = {
+  computeContentHash,
   uploadBuffer,
   uploadFile,
   uploadJSON,

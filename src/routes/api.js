@@ -48,6 +48,20 @@ const templateUpload = multer({
   limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
 });
 
+const certificateVerifyUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const isPdf = ext === ".pdf" || file.mimetype === "application/pdf";
+    if (isPdf) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only PDF certificate files are allowed"));
+    }
+  },
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BULK ISSUANCE ENDPOINTS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -91,6 +105,13 @@ router.post("/certificates/issue", certificateController.issueSingle);
 
 // Verify a certificate by ID
 router.get("/certificates/verify/:certId", certificateController.verifyCertificate);
+
+// Verify an uploaded certificate document by hashing and comparing with on-chain IPFS file
+router.post(
+  "/certificates/verify-file",
+  certificateVerifyUpload.single("document"),
+  certificateController.verifyCertificateDocument
+);
 
 // Generate PDF for an existing certificate
 router.get("/certificates/:certId/pdf", certificateController.generatePDF);

@@ -166,10 +166,12 @@ async function processPipeline(job, templateName, sendEmails) {
     const pdfResult = pdfResults[i];
     if (pdfResult.status === "success" && pdfResult.buffer) {
       try {
+        const documentHash = ipfsService.computeContentHash(pdfResult.buffer);
+        certs[i].documentHash = documentHash;
         const ipfsResult = await ipfsService.uploadBuffer(
           pdfResult.buffer,
           pdfResult.fileName,
-          { certId: certs[i].certId, type: "certificate" }
+          { certId: certs[i].certId, type: "certificate", documentHash }
         );
         certs[i].ipfsHash = ipfsResult.ipfsHash;
         certs[i].ipfsPinned = ipfsResult.pinned;
@@ -253,6 +255,7 @@ async function processPipeline(job, templateName, sendEmails) {
       },
       ipfs: {
         hash: cert.ipfsHash || null,
+        documentHash: cert.documentHash || null,
         pinned: cert.ipfsPinned || false,
         gateway: cert.ipfsGateway || null,
       },
