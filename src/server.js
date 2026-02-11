@@ -11,6 +11,7 @@ const rateLimit = require("express-rate-limit");
 const path = require("path");
 const fs = require("fs");
 const mongoose = require("mongoose");
+const { ethers } = require("ethers");
 
 const apiRoutes = require("./routes/api");
 const institutionRoutes = require("./routes/institution");
@@ -92,10 +93,29 @@ app.use((err, req, res, _next) => {
 
 // ── Start ───────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
+  let signerAddress = null;
+  try {
+    if (process.env.PRIVATE_KEY) {
+      signerAddress = new ethers.Wallet(process.env.PRIVATE_KEY).address;
+    }
+  } catch {
+    // Ignore invalid key formatting here; runtime tx calls will report exact error.
+  }
+
   console.log(`\n🎓 Edulocka Backend running on http://localhost:${PORT}`);
   console.log(`   Environment: ${process.env.NODE_ENV || "development"}`);
   console.log(`   Frontend:    ${process.env.FRONTEND_URL}`);
-  console.log(`   RPC:         ${process.env.RPC_URL}\n`);
+  console.log(`   RPC:         ${process.env.RPC_URL}`);
+  if (signerAddress) {
+    console.log(`   Signer:      ${signerAddress}`);
+  }
+
+  const adminWallet = (process.env.ADMIN_WALLET_ADDRESS || "").toLowerCase();
+  if (adminWallet && signerAddress && adminWallet !== signerAddress.toLowerCase()) {
+    console.warn("⚠️  ADMIN_WALLET_ADDRESS does not match PRIVATE_KEY signer. Admin approvals may fail on-chain.");
+  }
+
+  console.log("");
 });
 
 module.exports = app;

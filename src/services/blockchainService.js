@@ -60,16 +60,74 @@ if (fs.existsSync(ARTIFACT_PATH)) {
 const CONTRACT_ADDRESS = process.env.CONTRACT_ADDRESS;
 const RPC_URL = process.env.RPC_URL;
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
+const RPC_CHAIN_ID = Number(process.env.RPC_CHAIN_ID || 11155111);
+const RPC_CHAIN_NAME = process.env.RPC_CHAIN_NAME || (RPC_CHAIN_ID === 11155111 ? "sepolia" : `chain-${RPC_CHAIN_ID}`);
+
+let _cachedProvider = null;
+let _cachedSigner = null;
+
+function formatRpcError(err, context) {
+  const rawMessage = err?.shortMessage || err?.reason || err?.message || String(err);
+  const message = String(rawMessage).toLowerCase();
+  const code = String(err?.code ?? err?.info?.error?.code ?? "");
+
+  if (code === "EAI_AGAIN" || code === "ENOTFOUND" || message.includes("eai_again") || message.includes("enotfound")) {
+    return `${context}: DNS lookup failed for RPC host. Verify internet/DNS and RPC_URL (${RPC_URL}).`;
+  }
+  if (code === "ECONNREFUSED" || code === "ETIMEDOUT" || message.includes("failed to detect network")) {
+    return `${context}: Unable to connect to the RPC node at ${RPC_URL}. Check that the endpoint is reachable.`;
+  }
+  if (code === "-32005" || message.includes("too many requests") || message.includes("rate limit")) {
+    return `${context}: RPC rate limited the request. Upgrade provider quota or reduce request frequency.`;
+  }
+  if (message.includes("insufficient funds")) {
+    return `${context}: Signer wallet has insufficient ETH for gas on chain ${RPC_CHAIN_ID}.`;
+  }
+
+  return `${context}: ${rawMessage}`;
+}
+
+function wrapRpcError(err, context) {
+  const wrapped = new Error(formatRpcError(err, context));
+  wrapped.cause = err;
+  return wrapped;
+}
+
+async function withRpcContext(context, operation) {
+  try {
+    return await operation();
+  } catch (err) {
+    throw wrapRpcError(err, context);
+  }
+}
 
 // ── Provider & Contract Instances ───────────────────────────────────────────
 
 function getProvider() {
-  return new ethers.JsonRpcProvider(RPC_URL);
+  if (!RPC_URL) {
+    throw new Error("Missing RPC_URL in backend .env");
+  }
+  if (!_cachedProvider) {
+    _cachedProvider = new ethers.JsonRpcProvider(
+      RPC_URL,
+      { name: RPC_CHAIN_NAME, chainId: RPC_CHAIN_ID },
+      {
+        staticNetwork: true,
+        batchMaxCount: 1,
+      }
+    );
+  }
+  return _cachedProvider;
 }
 
 function getSigner() {
-  const provider = getProvider();
-  return new ethers.Wallet(PRIVATE_KEY, provider);
+  if (!PRIVATE_KEY) {
+    throw new Error("Missing PRIVATE_KEY in backend .env");
+  }
+  if (!_cachedSigner) {
+    _cachedSigner = new ethers.Wallet(PRIVATE_KEY, getProvider());
+  }
+  return _cachedSigner;
 }
 
 function getReadContract() {
@@ -84,7 +142,9 @@ function getWriteContract() {
 
 async function generateCertificateId() {
   const contract = getReadContract();
-  const count = await contract.getTotalCertificates();
+  const count = await withRpcContext("Failed to fetch total certificates", () =>
+    contract.getTotalCertificates()
+  );
   const year = new Date().getFullYear();
   const seq = String(Number(count) + 1).padStart(3, "0");
   const rand = Math.random().toString(36).substring(2, 5).toUpperCase();
@@ -108,16 +168,20 @@ async function issueCertificate({
       ? issueDate
       : Math.floor(new Date(issueDate).getTime() / 1000);
 
-  const tx = await contract.issueCertificate(
-    certId,
-    studentName,
-    studentId,
-    degree,
-    institution,
-    timestamp,
-    ipfsHash || ""
+  const tx = await withRpcContext("Failed to submit certificate issuance transaction", () =>
+    contract.issueCertificate(
+      certId,
+      studentName,
+      studentId,
+      degree,
+      institution,
+      timestamp,
+      ipfsHash || ""
+    )
   );
-  const receipt = await tx.wait();
+  const receipt = await withRpcContext("Failed while waiting for issuance transaction confirmation", () =>
+    tx.wait()
+  );
 
   return {
     txHash: tx.hash,
@@ -213,10 +277,14 @@ async function issueBatch(certificates, onProgress) {
 async function verifyCertificate(certId) {
   const contract = getReadContract();
 
-  const exists = await contract.certificateExistsCheck(certId);
+  const exists = await withRpcContext("Failed to check certificate existence", () =>
+    contract.certificateExistsCheck(certId)
+  );
   if (!exists) return { exists: false };
 
-  const cert = await contract.getCertificate(certId);
+  const cert = await withRpcContext("Failed to read certificate details", () =>
+    contract.getCertificate(certId)
+  );
   return {
     exists: true,
     isValid: cert.isValid,
@@ -235,9 +303,9 @@ async function verifyCertificate(certId) {
 async function getStats() {
   const contract = getReadContract();
   const [totalCerts, totalInst, totalRevoke] = await Promise.all([
-    contract.getTotalCertificates(),
-    contract.totalInstitutions(),
-    contract.totalRevocations(),
+    withRpcContext("Failed to fetch total certificates", () => contract.getTotalCertificates()),
+    withRpcContext("Failed to fetch total institutions", () => contract.totalInstitutions()),
+    withRpcContext("Failed to fetch total revocations", () => contract.totalRevocations()),
   ]);
   return {
     totalCertificates: Number(totalCerts),
@@ -264,13 +332,19 @@ async function isAuthorized() {
  */
 async function authorizeInstitution(walletAddress, data) {
   const contract = getWriteContract();
-  const tx = await contract.addInstitution(
-    walletAddress,
-    data.name,
-    data.registrationNumber,
-    data.country
+  const tx = await withRpcContext(
+    `Failed to submit institution authorization tx for ${walletAddress}`,
+    () =>
+      contract.addInstitution(
+        walletAddress,
+        data.name,
+        data.registrationNumber,
+        data.country
+      )
   );
-  const receipt = await tx.wait();
+  const receipt = await withRpcContext("Failed while waiting for institution authorization confirmation", () =>
+    tx.wait()
+  );
   return {
     txHash: tx.hash,
     blockNumber: receipt.blockNumber,
@@ -284,8 +358,12 @@ async function authorizeInstitution(walletAddress, data) {
  */
 async function deauthorizeInstitution(walletAddress) {
   const contract = getWriteContract();
-  const tx = await contract.removeInstitution(walletAddress);
-  const receipt = await tx.wait();
+  const tx = await withRpcContext(`Failed to submit deauthorization tx for ${walletAddress}`, () =>
+    contract.removeInstitution(walletAddress)
+  );
+  const receipt = await withRpcContext("Failed while waiting for deauthorization confirmation", () =>
+    tx.wait()
+  );
   return {
     txHash: tx.hash,
     blockNumber: receipt.blockNumber,
@@ -300,7 +378,9 @@ async function deauthorizeInstitution(walletAddress) {
  */
 async function checkIfAuthorized(walletAddress) {
   const contract = getReadContract();
-  return await contract.isAuthorizedInstitution(walletAddress);
+  return await withRpcContext(`Failed to check authorization for ${walletAddress}`, () =>
+    contract.isAuthorizedInstitution(walletAddress)
+  );
 }
 
 /**
@@ -310,8 +390,14 @@ async function checkIfAuthorized(walletAddress) {
  */
 async function getInstitutionInfo(walletAddress) {
   const contract = getReadContract();
-  const inst = await contract.getInstitution(walletAddress);
-  const isAuth = await contract.isAuthorizedInstitution(walletAddress);
+  const [inst, isAuth] = await Promise.all([
+    withRpcContext(`Failed to load institution record for ${walletAddress}`, () =>
+      contract.getInstitution(walletAddress)
+    ),
+    withRpcContext(`Failed to load authorization state for ${walletAddress}`, () =>
+      contract.isAuthorizedInstitution(walletAddress)
+    ),
+  ]);
 
   return {
     name: inst.name,
@@ -330,13 +416,25 @@ async function getInstitutionInfo(walletAddress) {
  */
 async function getAllInstitutions() {
   const contract = getReadContract();
-  const count = Number(await contract.getAllInstitutionCount());
+  const count = Number(
+    await withRpcContext("Failed to fetch institution count", () =>
+      contract.getAllInstitutionCount()
+    )
+  );
   const institutions = [];
 
   for (let i = 0; i < count; i++) {
-    const address = await contract.getInstitutionAddressByIndex(i);
-    const inst = await contract.getInstitution(address);
-    const isAuth = await contract.isAuthorizedInstitution(address);
+    const address = await withRpcContext(`Failed to fetch institution address at index ${i}`, () =>
+      contract.getInstitutionAddressByIndex(i)
+    );
+    const [inst, isAuth] = await Promise.all([
+      withRpcContext(`Failed to fetch institution data for ${address}`, () =>
+        contract.getInstitution(address)
+      ),
+      withRpcContext(`Failed to fetch authorization flag for ${address}`, () =>
+        contract.isAuthorizedInstitution(address)
+      ),
+    ]);
     institutions.push({
       address,
       name: inst.name,
