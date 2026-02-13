@@ -9,6 +9,10 @@ const { verifyWalletSignature } = require("./authMiddleware");
 
 // The admin wallet address — set via environment variable
 const ADMIN_WALLET_ADDRESS = (process.env.ADMIN_WALLET_ADDRESS || "").toLowerCase();
+const ADMIN_AUTH_MAX_AGE_SECONDS = Math.max(
+  60,
+  parseInt(process.env.ADMIN_AUTH_MAX_AGE_SECONDS || "3600", 10) || 3600
+);
 
 /**
  * Check if a wallet address is the Edulocka admin.
@@ -65,10 +69,17 @@ function requireAdminAuth(req, res, next) {
     });
   }
 
-  const messageTimestamp = parseInt(timestampMatch[1], 10);
+  let messageTimestamp = parseInt(timestampMatch[1], 10);
+  // Accept millisecond timestamps defensively.
+  if (messageTimestamp > 1_000_000_000_000) {
+    messageTimestamp = Math.floor(messageTimestamp / 1000);
+  }
   const now = Math.floor(Date.now() / 1000);
-  if (Math.abs(now - messageTimestamp) > 5 * 60) {
-    return res.status(401).json({ error: "Auth message expired. Please sign a fresh message." });
+  if (Math.abs(now - messageTimestamp) > ADMIN_AUTH_MAX_AGE_SECONDS) {
+    return res.status(401).json({
+      error: "Auth message expired. Please sign a fresh message.",
+      maxAgeSeconds: ADMIN_AUTH_MAX_AGE_SECONDS,
+    });
   }
 
   // Verify the signature
