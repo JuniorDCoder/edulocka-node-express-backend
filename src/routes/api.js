@@ -5,6 +5,7 @@
 const express = require("express");
 const multer = require("multer");
 const path = require("path");
+const fs = require("fs");
 const router = express.Router();
 
 const bulkController = require("../controllers/bulkController");
@@ -12,11 +13,14 @@ const certificateController = require("../controllers/certificateController");
 const blogController = require("../controllers/blogController");
 const { requireWalletAuth, optionalWalletAuth } = require("../middleware/authMiddleware");
 const { requireAdminAuth } = require("../middleware/adminMiddleware");
+const { ensureDirSync, getUploadsDir } = require("../utils/runtimePaths");
 
 // ── File upload config ──────────────────────────────────────────────────────
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    cb(null, path.join(__dirname, "..", "..", "uploads"));
+    const uploadDir = getUploadsDir();
+    if (!fs.existsSync(uploadDir)) ensureDirSync(uploadDir);
+    cb(null, uploadDir);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);

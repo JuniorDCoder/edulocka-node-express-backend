@@ -7,9 +7,10 @@
 const QRCode = require("qrcode");
 const path = require("path");
 const fs = require("fs");
+const { ensureDirSync, getQRCodesOutputDir } = require("../utils/runtimePaths");
 
 const VERIFY_BASE_URL = process.env.VERIFY_BASE_URL || "http://localhost:3000/verify";
-const OUTPUT_DIR = path.join(__dirname, "..", "..", "output", "qrcodes");
+const OUTPUT_DIR = getQRCodesOutputDir();
 
 // ── Generate verification URL ───────────────────────────────────────────────
 
@@ -77,6 +78,11 @@ async function saveQRToFile(certId, options = {}) {
   const fileName = options.fileName || `${certId}.png`;
   const filePath = path.join(OUTPUT_DIR, fileName);
 
+  if (!ensureDirSync(OUTPUT_DIR)) {
+    throw new Error(
+      `Unable to create QR output directory. Set EDULOCKA_STORAGE_ROOT to a writable path (current: ${OUTPUT_DIR}).`
+    );
+  }
   fs.writeFileSync(filePath, buffer);
   return { filePath, fileName, size: buffer.length };
 }

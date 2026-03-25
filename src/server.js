@@ -13,6 +13,17 @@ const fs = require("fs");
 const mongoose = require("mongoose");
 const { ethers } = require("ethers");
 
+const {
+  ensureDirSync,
+  getUploadsDir,
+  getInstitutionDocsDir,
+  getOutputDir,
+  getCertificatesOutputDir,
+  getQRCodesOutputDir,
+  getExportsOutputDir,
+  isServerlessRuntime,
+} = require("./utils/runtimePaths");
+
 const apiRoutes = require("./routes/api");
 const institutionRoutes = require("./routes/institution");
 const adminRoutes = require("./routes/admin");
@@ -22,15 +33,15 @@ const PORT = process.env.PORT || 4000;
 
 // ── Ensure directories exist ────────────────────────────────────────────────
 const dirs = [
-  path.join(__dirname, "..", "uploads"),
-  path.join(__dirname, "..", "uploads", "institution-docs"),
-  path.join(__dirname, "..", "output"),
-  path.join(__dirname, "..", "output", "certificates"),
-  path.join(__dirname, "..", "output", "qrcodes"),
-  path.join(__dirname, "..", "output", "exports"),
+  getUploadsDir(),
+  getInstitutionDocsDir(),
+  getOutputDir(),
+  getCertificatesOutputDir(),
+  getQRCodesOutputDir(),
+  getExportsOutputDir(),
 ];
 dirs.forEach((dir) => {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (!fs.existsSync(dir)) ensureDirSync(dir);
 });
 
 // ── MongoDB Connection ──────────────────────────────────────────────────────
@@ -128,25 +139,32 @@ void connectMongo();
 
 const allowedOrigins = [
   "https://edulocka.vercel.app",
+  "https://www.edulocka.vercel.app",
   "http://localhost:3000",
+  "http://localhost:5173",
   process.env.FRONTEND_URL,
-];
+].filter(Boolean);
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  return allowedOrigins.includes(origin);
+}
+
+const corsOptions = {
+  origin: (origin, callback) => {
+    if (isAllowedOrigin(origin)) return callback(null, true);
+    return callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+  methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  optionsSuccessStatus: 204,
+};
 
 // ── Middleware ───────────────────────────────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
-app.use(
-  cors({
-    origin: (origin, callback) => {
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      }
-      else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    credentials: true,
-  })
-);
+app.use(cors(corsOptions));
+app.options("*", cors(corsOptions));
 app.use(morgan("dev"));
 app.use(express.json({ limit: "50mb" }));
 app.use(express.urlencoded({ extended: true, limit: "50mb" }));
@@ -162,7 +180,7 @@ app.use("/api", limiter);
 // Serve generated files (PDFs, QR codes)
 app.use(
   "/output",
-  express.static(path.join(__dirname, "..", "output"), {
+  express.static(getOutputDir(), {
     setHeaders: (res, filePath) => {
       if (filePath.endsWith(".pdf")) {
         res.setHeader("Content-Type", "application/pdf");
@@ -195,7 +213,8 @@ app.use((err, req, res, _next) => {
 });
 
 // ── Start ───────────────────────────────────────────────────────────────────
-app.listen(PORT, () => {
+if (!isServerlessRuntime() && require.main === module) {
+  app.listen(PORT, () => {
   let signerAddress = null;
   try {
     if (process.env.PRIVATE_KEY) {
@@ -219,6 +238,7 @@ app.listen(PORT, () => {
   }
 
   console.log("");
-});
+  });
+}
 
 module.exports = app;

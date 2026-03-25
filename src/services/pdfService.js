@@ -10,15 +10,16 @@ const { PDFDocument } = require("pdf-lib");
 const fs = require("fs");
 const path = require("path");
 const qrService = require("./qrService");
+const {
+  ensureDirSync,
+  getCertificatesOutputDir,
+  getInstitutionTemplatesDir,
+  getTemplatesDir,
+} = require("../utils/runtimePaths");
 
-const TEMPLATES_DIR = path.join(__dirname, "..", "..", "templates");
-const INSTITUTION_TEMPLATES_DIR = path.join(TEMPLATES_DIR, "institutions");
-const OUTPUT_DIR = path.join(__dirname, "..", "..", "output", "certificates");
-
-// Ensure institution templates directory exists
-if (!fs.existsSync(INSTITUTION_TEMPLATES_DIR)) {
-  fs.mkdirSync(INSTITUTION_TEMPLATES_DIR, { recursive: true });
-}
+const TEMPLATES_DIR = getTemplatesDir();
+const INSTITUTION_TEMPLATES_DIR = getInstitutionTemplatesDir();
+const OUTPUT_DIR = getCertificatesOutputDir();
 
 // ── Register Handlebars helpers ─────────────────────────────────────────────
 
@@ -49,7 +50,10 @@ Handlebars.registerHelper("uppercase", function (str) {
 function loadTemplate(templateName = "default-certificate", walletAddress = null) {
   // If wallet provided, check institution-specific directory first
   if (walletAddress) {
-    const institutionDir = path.join(INSTITUTION_TEMPLATES_DIR, walletAddress.toLowerCase());
+    const institutionDir = path.join(
+      INSTITUTION_TEMPLATES_DIR,
+      walletAddress.toLowerCase()
+    );
     const institutionPath = path.join(institutionDir, `${templateName}.html`);
     if (fs.existsSync(institutionPath)) {
       return fs.readFileSync(institutionPath, "utf8");
@@ -139,10 +143,13 @@ async function savePDF(templateName, data, options = {}, walletAddress = null) {
     options.fileName || `${data.certId}-${sanitizedName}.pdf`;
   const filePath = path.join(OUTPUT_DIR, fileName);
 
-  fs.writeFileSync(filePath, pdfBuffer);
+  const canWrite = ensureDirSync(OUTPUT_DIR);
+  if (canWrite) {
+    fs.writeFileSync(filePath, pdfBuffer);
+  }
 
   return {
-    filePath,
+    filePath: canWrite ? filePath : null,
     fileName,
     size: pdfBuffer.length,
     buffer: pdfBuffer,
@@ -192,11 +199,14 @@ async function bulkGeneratePDFs(templateName, certificates, onProgress, walletAd
         const fileName = `${cert.certId}-${sanitizedName}.pdf`;
         const filePath = path.join(OUTPUT_DIR, fileName);
 
-        fs.writeFileSync(filePath, pdfBuffer);
+        const canWrite = ensureDirSync(OUTPUT_DIR);
+        if (canWrite) {
+          fs.writeFileSync(filePath, pdfBuffer);
+        }
 
         results.push({
           certId: cert.certId,
-          filePath,
+          filePath: canWrite ? filePath : null,
           fileName,
           size: pdfBuffer.length,
           buffer: Buffer.from(pdfBuffer),
@@ -282,7 +292,12 @@ function listTemplates(walletAddress = null) {
 function getInstitutionTemplateDir(walletAddress) {
   const dir = path.join(INSTITUTION_TEMPLATES_DIR, walletAddress.toLowerCase());
   if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+    const ok = ensureDirSync(dir);
+    if (!ok) {
+      throw new Error(
+        `Unable to create institution template directory. Set EDULOCKA_STORAGE_ROOT to a writable path (current: ${dir}).`
+      );
+    }
   }
   return dir;
 }
