@@ -126,11 +126,24 @@ mongoose.connection.on("error", (err) => {
 
 void connectMongo();
 
+const allowedOrigins = [
+  "https://edulocka.vercel.app",
+  "http://localhost:3000",
+  process.env.FRONTEND_URL,
+];
+
 // ── Middleware ───────────────────────────────────────────────────────────────
 app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:3000",
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      }
+      else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   })
 );
