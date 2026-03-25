@@ -70,7 +70,14 @@ const corsOptions = {
   },
   credentials: true,
   methods: ["GET", "HEAD", "PUT", "PATCH", "POST", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+  allowedHeaders: [
+    "Content-Type",
+    "Authorization",
+    "X-Requested-With",
+    "x-wallet-address",
+    "x-wallet-signature",
+    "x-wallet-message",
+  ],
   optionsSuccessStatus: 204,
 };
 
