@@ -100,7 +100,51 @@ router.get("/blogs/pending-review", requireAdminAuth, blogController.listPending
 router.post("/blogs/:id/review", requireAdminAuth, blogController.reviewBlog);
 
 // Public blog feed + detail (published only)
+/**
+ * @openapi
+ * /api/blogs:
+ *   get:
+ *     tags: [Blogs]
+ *     summary: List published blogs
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, example: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, example: 24 }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string, example: blockchain }
+ *       - in: query
+ *         name: tag
+ *         schema: { type: string, example: education }
+ *     responses:
+ *       200:
+ *         description: Blog list
+ *       503:
+ *         description: Database unavailable
+ */
 router.get("/blogs", blogController.listPublishedBlogs);
+/**
+ * @openapi
+ * /api/blogs/{slug}:
+ *   get:
+ *     tags: [Blogs]
+ *     summary: Get a published blog by slug
+ *     parameters:
+ *       - in: path
+ *         name: slug
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Blog detail
+ *       404:
+ *         description: Not found
+ *       503:
+ *         description: Database unavailable
+ */
 router.get("/blogs/:slug", blogController.getPublishedBlog);
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,6 +152,32 @@ router.get("/blogs/:slug", blogController.getPublishedBlog);
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Upload a custom certificate HTML template (requires wallet auth)
+/**
+ * @openapi
+ * /api/templates/upload:
+ *   post:
+ *     tags: [Templates]
+ *     summary: Upload a custom certificate template for a wallet
+ *     security:
+ *       - WalletAddress: []
+ *         WalletSignature: []
+ *         WalletMessage: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               template:
+ *                 type: string
+ *                 format: binary
+ *     responses:
+ *       200:
+ *         description: Template uploaded
+ *       401:
+ *         description: Wallet auth required
+ */
 router.post(
   "/templates/upload",
   requireWalletAuth,
@@ -116,6 +186,21 @@ router.post(
 );
 
 // List available templates (optional auth — defaults for all, + institution-specific when authenticated)
+/**
+ * @openapi
+ * /api/templates:
+ *   get:
+ *     tags: [Templates]
+ *     summary: List certificate templates (default + institution-specific if wallet header provided)
+ *     parameters:
+ *       - in: header
+ *         name: x-wallet-address
+ *         required: false
+ *         schema: { type: string, example: "0x0000000000000000000000000000000000000000" }
+ *     responses:
+ *       200:
+ *         description: Template list
+ */
 router.get("/templates", optionalWalletAuth, certificateController.listTemplates);
 
 // Preview a template with sample data (optional auth for institution templates)
@@ -126,9 +211,53 @@ router.post("/templates/preview", optionalWalletAuth, certificateController.prev
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Issue a single certificate (with PDF + QR + optional email)
+/**
+ * @openapi
+ * /api/certificates/issue:
+ *   post:
+ *     tags: [Certificates]
+ *     summary: Issue a single certificate (generates PDF + QR, uploads to IPFS, anchors on-chain)
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [studentName, studentId, degree, institution, issueDate]
+ *             properties:
+ *               studentName: { type: string }
+ *               studentId: { type: string }
+ *               degree: { type: string }
+ *               institution: { type: string }
+ *               issueDate: { type: string, example: "2026-03-25" }
+ *               email: { type: string, example: "student@example.com" }
+ *               templateName: { type: string, example: "default-certificate" }
+ *     responses:
+ *       200:
+ *         description: Issued successfully
+ *       400:
+ *         description: Validation error
+ */
 router.post("/certificates/issue", certificateController.issueSingle);
 
 // Verify a certificate by ID
+/**
+ * @openapi
+ * /api/certificates/verify/{certId}:
+ *   get:
+ *     tags: [Certificates]
+ *     summary: Verify a certificate on-chain by certificate ID
+ *     parameters:
+ *       - in: path
+ *         name: certId
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200:
+ *         description: Verification result
+ *       404:
+ *         description: Not found on chain
+ */
 router.get("/certificates/verify/:certId", certificateController.verifyCertificate);
 
 // Verify an uploaded certificate document by hashing and comparing with on-chain IPFS file

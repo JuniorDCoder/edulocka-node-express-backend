@@ -50,6 +50,14 @@ npm run dev
 
 Server runs on **http://localhost:4000**
 
+## API Documentation (Swagger UI)
+
+After installing dependencies, open:
+- `http://localhost:4000/docs` — interactive Swagger UI
+- `http://localhost:4000/docs.json` — OpenAPI JSON
+
+To show the correct server URL in the docs, set `PUBLIC_API_BASE_URL` (example: `https://your-backend.vercel.app`).
+
 ## API Endpoints
 
 ### Bulk Issuance
