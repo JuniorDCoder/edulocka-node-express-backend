@@ -13,6 +13,7 @@ const fs = require("fs");
 const mongoose = require("mongoose");
 const { ethers } = require("ethers");
 
+const { connectMongo, mongoStateLabel } = require("./db/mongo");
 const {
   ensureDirSync,
   getUploadsDir,
@@ -45,97 +46,9 @@ dirs.forEach((dir) => {
 });
 
 // ── MongoDB Connection ──────────────────────────────────────────────────────
-const MONGODB_URI = process.env.MONGODB_URI || "mongodb://localhost:27017/edulocka";
-const MONGODB_RETRY_DELAY_MS = Math.max(
-  1000,
-  parseInt(process.env.MONGODB_RETRY_DELAY_MS || "5000", 10) || 5000
-);
-let mongoConnectPromise = null;
-let mongoRetryTimer = null;
-let mongoRetryDisabled = false;
-
-function mongoStateLabel() {
-  if (mongoRetryDisabled) return "auth_failed";
-  switch (mongoose.connection.readyState) {
-    case 1:
-      return "connected";
-    case 2:
-      return "connecting";
-    case 3:
-      return "disconnecting";
-    default:
-      return "disconnected";
-  }
-}
-
-function isPermanentMongoError(err) {
-  const message = String(err?.message || "").toLowerCase();
-  const name = String(err?.name || "").toLowerCase();
-  const code = Number(err?.code);
-
-  return (
-    code === 18 ||
-    name.includes("mongoauthenticationerror") ||
-    message.includes("authentication failed") ||
-    message.includes("bad auth") ||
-    message.includes("auth failed")
-  );
-}
-
-async function connectMongo() {
-  if (mongoRetryDisabled) return;
-  if (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2) return;
-  if (mongoConnectPromise) return mongoConnectPromise;
-
-  mongoConnectPromise = mongoose
-    .connect(MONGODB_URI, {
-      serverSelectionTimeoutMS: 10000,
-    })
-    .then(() => {
-      console.log("✅ MongoDB connected:", MONGODB_URI);
-    })
-    .catch((err) => {
-      console.warn("⚠️  MongoDB connection failed:", err.message);
-      if (isPermanentMongoError(err)) {
-        mongoRetryDisabled = true;
-        console.error("❌ MongoDB authentication failed. Disable retries until config is fixed and service restarts.");
-        return;
-      }
-      scheduleMongoReconnect("initial connection failure");
-    })
-    .finally(() => {
-      mongoConnectPromise = null;
-    });
-
-  return mongoConnectPromise;
-}
-
-function scheduleMongoReconnect(reason) {
-  if (mongoRetryDisabled) return;
-  if (mongoRetryTimer) return;
-  console.warn(`⚠️  Scheduling MongoDB reconnect in ${MONGODB_RETRY_DELAY_MS}ms (${reason}).`);
-  mongoRetryTimer = setTimeout(() => {
-    mongoRetryTimer = null;
-    void connectMongo();
-  }, MONGODB_RETRY_DELAY_MS);
-}
-
-mongoose.connection.on("disconnected", () => {
-  if (mongoRetryDisabled) return;
-  scheduleMongoReconnect("connection dropped");
+void connectMongo().catch(() => {
+  // Keep process alive; routes may attempt re-connect per request.
 });
-
-mongoose.connection.on("error", (err) => {
-  console.warn("⚠️  MongoDB connection error:", err.message);
-  if (isPermanentMongoError(err)) {
-    mongoRetryDisabled = true;
-    console.error("❌ MongoDB authentication failed. Disable retries until config is fixed and service restarts.");
-    return;
-  }
-  scheduleMongoReconnect("connection error");
-});
-
-void connectMongo();
 
 const allowedOrigins = [
   "https://edulocka.vercel.app",

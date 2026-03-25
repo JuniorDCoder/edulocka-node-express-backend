@@ -9,18 +9,28 @@ const BlogPost = require("../models/BlogPost");
 const BlogAuditLog = require("../models/BlogAuditLog");
 const blockchainService = require("../services/blockchainService");
 const { isAdminWallet } = require("../middleware/adminMiddleware");
+const {
+  ensureMongoConnected: ensureMongoConnectedInternal,
+  mongoStateLabel,
+  getLastMongoErrorMessage,
+} = require("../db/mongo");
 
 const MAX_PAGE_SIZE = 24;
 const MAX_LOG_PAGE_SIZE = 50;
 
-function ensureMongoConnected(res) {
-  if (mongoose.connection.readyState !== 1) {
-    res.status(503).json({
-      error: "Database unavailable. Ensure MongoDB is connected before using blog features.",
-    });
-    return false;
-  }
-  return true;
+async function ensureMongoConnected(res) {
+  if (mongoose.connection.readyState === 1) return true;
+  const ok = await ensureMongoConnectedInternal();
+  if (ok) return true;
+
+  res.status(503).json({
+    error: "Database unavailable. Ensure MongoDB is connected before using blog features.",
+    db: mongoStateLabel(),
+    ...(process.env.NODE_ENV === "development" && {
+      details: getLastMongoErrorMessage(),
+    }),
+  });
+  return false;
 }
 
 function parsePagination(query = {}) {
@@ -226,7 +236,7 @@ async function writeBlogAuditLog({
 // GET /api/blogs
 async function listPublishedBlogs(req, res) {
   try {
-    if (!ensureMongoConnected(res)) return;
+    if (!(await ensureMongoConnected(res))) return;
 
     const { page, limit, skip } = parsePagination(req.query);
     const search = String(req.query.search || "").trim();
@@ -271,7 +281,7 @@ async function listPublishedBlogs(req, res) {
 // GET /api/blogs/:slug
 async function getPublishedBlog(req, res) {
   try {
-    if (!ensureMongoConnected(res)) return;
+    if (!(await ensureMongoConnected(res))) return;
 
     const slug = String(req.params.slug || "").toLowerCase().trim();
     if (!slug) return res.status(400).json({ error: "Missing blog slug" });
@@ -290,7 +300,7 @@ async function getPublishedBlog(req, res) {
 // GET /api/blogs/my
 async function listMyBlogs(req, res) {
   try {
-    if (!ensureMongoConnected(res)) return;
+    if (!(await ensureMongoConnected(res))) return;
 
     const wallet = String(req.walletAddress || "").toLowerCase();
     const { page, limit, skip } = parsePagination(req.query);
@@ -338,7 +348,7 @@ async function listMyBlogs(req, res) {
 // GET /api/blogs/my/:id
 async function getMyBlogById(req, res) {
   try {
-    if (!ensureMongoConnected(res)) return;
+    if (!(await ensureMongoConnected(res))) return;
 
     const id = String(req.params.id || "").trim();
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -368,7 +378,7 @@ async function getMyBlogById(req, res) {
 // POST /api/blogs
 async function createBlog(req, res) {
   try {
-    if (!ensureMongoConnected(res)) return;
+    if (!(await ensureMongoConnected(res))) return;
 
     const authorWallet = String(req.walletAddress || "").toLowerCase();
     const title = String(req.body.title || "").trim();
@@ -446,7 +456,7 @@ async function createBlog(req, res) {
 // PUT /api/blogs/:id
 async function updateBlog(req, res) {
   try {
-    if (!ensureMongoConnected(res)) return;
+    if (!(await ensureMongoConnected(res))) return;
 
     const id = String(req.params.id || "").trim();
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -598,7 +608,7 @@ async function updateBlog(req, res) {
 // DELETE /api/blogs/:id
 async function deleteBlog(req, res) {
   try {
-    if (!ensureMongoConnected(res)) return;
+    if (!(await ensureMongoConnected(res))) return;
 
     const id = String(req.params.id || "").trim();
     if (!mongoose.Types.ObjectId.isValid(id)) {
@@ -634,7 +644,7 @@ async function deleteBlog(req, res) {
 // GET /api/blogs/pending-review
 async function listPendingReviewBlogs(req, res) {
   try {
-    if (!ensureMongoConnected(res)) return;
+    if (!(await ensureMongoConnected(res))) return;
 
     const { page, limit, skip } = parsePagination(req.query);
     const search = String(req.query.search || "").trim();
@@ -677,7 +687,7 @@ async function listPendingReviewBlogs(req, res) {
 // GET /api/admin/blogs
 async function listBlogsForAdmin(req, res) {
   try {
-    if (!ensureMongoConnected(res)) return;
+    if (!(await ensureMongoConnected(res))) return;
 
     const { page, limit, skip } = parsePagination(req.query);
     const status = String(req.query.status || "").trim();
@@ -733,7 +743,7 @@ async function listBlogsForAdmin(req, res) {
 // GET /api/admin/blog-logs
 async function listBlogAuditLogs(req, res) {
   try {
-    if (!ensureMongoConnected(res)) return;
+    if (!(await ensureMongoConnected(res))) return;
 
     const page = Math.max(1, parseInt(String(req.query.page || "1"), 10) || 1);
     const rawLimit = parseInt(String(req.query.limit || "20"), 10) || 20;
@@ -791,7 +801,7 @@ async function listBlogAuditLogs(req, res) {
 // body: { action: "approve" | "reject", note?: string }
 async function reviewBlog(req, res) {
   try {
-    if (!ensureMongoConnected(res)) return;
+    if (!(await ensureMongoConnected(res))) return;
 
     const id = String(req.params.id || "").trim();
     if (!mongoose.Types.ObjectId.isValid(id)) {
