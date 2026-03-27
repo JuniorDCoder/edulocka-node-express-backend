@@ -311,6 +311,18 @@ async function generatePDF(req, res) {
       return res.status(404).json({ error: "Certificate not found" });
     }
 
+    if (cert.ipfsHash) {
+      try {
+        const ipfsDoc = await fetchIpfsDocument(cert.ipfsHash);
+        res.setHeader("Content-Type", "application/pdf");
+        res.setHeader("Content-Disposition", `inline; filename="${certId}.pdf"`);
+        res.setHeader("X-Edulocka-PDF-Source", "ipfs");
+        return res.send(ipfsDoc.buffer);
+      } catch (err) {
+        console.warn(`Falling back to rendered PDF for ${certId}:`, err.message);
+      }
+    }
+
     const pdfBuffer = await pdfService.generatePDF(templateName, {
       certId,
       ...cert,
@@ -318,6 +330,7 @@ async function generatePDF(req, res) {
 
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", `inline; filename="${certId}.pdf"`);
+    res.setHeader("X-Edulocka-PDF-Source", "rendered");
     res.send(pdfBuffer);
   } catch (err) {
     console.error("Generate PDF error:", err);
