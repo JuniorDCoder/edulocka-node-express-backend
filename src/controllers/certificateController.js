@@ -298,6 +298,13 @@ async function generatePDF(req, res) {
     const { certId } = req.params;
     const templateName = req.query.template || "default-certificate";
 
+    const existingPdfPath = pdfService.findExistingPdfPath(certId);
+    if (existingPdfPath && fs.existsSync(existingPdfPath)) {
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Disposition", `inline; filename="${path.basename(existingPdfPath)}"`);
+      return res.sendFile(existingPdfPath);
+    }
+
     // Fetch certificate data from blockchain
     const cert = await blockchainService.verifyCertificate(certId);
     if (!cert.exists) {
@@ -314,7 +321,13 @@ async function generatePDF(req, res) {
     res.send(pdfBuffer);
   } catch (err) {
     console.error("Generate PDF error:", err);
-    res.status(500).json({ error: err.message });
+    const message = err instanceof Error ? err.message : "PDF generation failed";
+    const missingBrowser =
+      message.includes("Could not find Chrome") ||
+      message.includes("Could not find Chromium") ||
+      message.includes("PUPPETEER_EXECUTABLE_PATH");
+
+    res.status(missingBrowser ? 503 : 500).json({ error: message });
   }
 }
 

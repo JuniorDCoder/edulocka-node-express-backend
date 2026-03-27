@@ -20,6 +20,20 @@ const {
 const TEMPLATES_DIR = getTemplatesDir();
 const INSTITUTION_TEMPLATES_DIR = getInstitutionTemplatesDir();
 const OUTPUT_DIR = getCertificatesOutputDir();
+const BROWSER_ENV_VARS = [
+  "PUPPETEER_EXECUTABLE_PATH",
+  "CHROME_BIN",
+  "GOOGLE_CHROME_BIN",
+  "CHROMIUM_PATH",
+];
+const COMMON_BROWSER_PATHS = [
+  "/usr/bin/google-chrome-stable",
+  "/usr/bin/google-chrome",
+  "/usr/bin/chromium-browser",
+  "/usr/bin/chromium",
+  "/opt/google/chrome/chrome",
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+];
 
 // ── Register Handlebars helpers ─────────────────────────────────────────────
 
@@ -94,19 +108,73 @@ async function renderHTML(templateName, data, walletAddress = null) {
 
 // ── Generate PDF from HTML ──────────────────────────────────────────────────
 
+function resolveBrowserExecutablePath() {
+  for (const envVar of BROWSER_ENV_VARS) {
+    const candidate = String(process.env[envVar] || "").trim();
+    if (candidate && fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  try {
+    const bundledPath = puppeteer.executablePath();
+    if (bundledPath && fs.existsSync(bundledPath)) {
+      return bundledPath;
+    }
+  } catch {
+    // Ignore and continue probing common system locations.
+  }
+
+  for (const candidate of COMMON_BROWSER_PATHS) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  return null;
+}
+
+async function launchBrowser() {
+  const executablePath = resolveBrowserExecutablePath();
+  const launchOptions = {
+    headless: true,
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-dev-shm-usage",
+    ],
+    ...(executablePath ? { executablePath } : {}),
+  };
+
+  try {
+    return await puppeteer.launch(launchOptions);
+  } catch (err) {
+    const details = executablePath
+      ? `Resolved browser path: ${executablePath}.`
+      : "No browser executable was found in Puppeteer's cache, the configured env vars, or the common system paths checked by Edulocka.";
+
+    err.message = `${err.message} ${details} Set PUPPETEER_EXECUTABLE_PATH (or CHROME_BIN) to a valid Chrome/Chromium binary, or run "npx puppeteer browsers install chrome" during deployment.`;
+    throw err;
+  }
+}
+
+function findExistingPdfPath(certId) {
+  if (!fs.existsSync(OUTPUT_DIR)) return null;
+
+  const prefix = `${certId}-`;
+  const match = fs
+    .readdirSync(OUTPUT_DIR)
+    .find((fileName) => fileName.startsWith(prefix) && fileName.endsWith(".pdf"));
+
+  return match ? path.join(OUTPUT_DIR, match) : null;
+}
+
 async function generatePDF(templateName, data, options = {}, walletAddress = null) {
   const html = await renderHTML(templateName, data, walletAddress);
 
   let browser;
   try {
-    browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-      ],
-    });
+    browser = await launchBrowser();
 
     const page = await browser.newPage();
 
@@ -164,14 +232,7 @@ async function bulkGeneratePDFs(templateName, certificates, onProgress, walletAd
   let browser;
 
   try {
-    browser = await puppeteer.launch({
-      headless: true,
-      args: [
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
-        "--disable-dev-shm-usage",
-      ],
-    });
+    browser = await launchBrowser();
 
     for (let i = 0; i < certificates.length; i++) {
       const cert = certificates[i];
@@ -310,4 +371,5 @@ module.exports = {
   bulkGeneratePDFs,
   listTemplates,
   getInstitutionTemplateDir,
+  findExistingPdfPath,
 };
