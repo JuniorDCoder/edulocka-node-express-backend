@@ -363,8 +363,21 @@ function getInstitutionTemplateDir(walletAddress) {
   return dir;
 }
 
+// ── Load template HTML (for API responses) ─────────────────────────────────
+
+async function loadTemplateHTML(templateName, walletAddress = null) {
+  try {
+    return loadTemplate(templateName, walletAddress);
+  } catch (err) {
+    // Return null if template not found (will be handled by controller)
+    console.warn(`Template not found: ${templateName}`);
+    return null;
+  }
+}
+
 module.exports = {
   loadTemplate,
+  loadTemplateHTML,
   renderHTML,
   generatePDF,
   savePDF,

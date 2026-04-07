@@ -329,6 +329,84 @@ async function deauthorizeInstitution(req, res) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/sync-to-blockchain — Authorize approved institutions on-chain
+// ─────────────────────────────────────────────────────────────────────────────
+// FIXES: Institutions that are approved in DB but not yet authorized on-chain
+async function syncApprovedInstitutionsToBlockchain(req, res) {
+  try {
+    // Find all approved institutions that are NOT yet authorized on-chain
+    const unapprovedInstitutions = await InstitutionApplication.find({
+      status: "approved",
+      authorizedOnChain: { $ne: true },
+    });
+
+    if (unapprovedInstitutions.length === 0) {
+      return res.json({
+        success: true,
+        message: "All approved institutions are already authorized on-chain.",
+        synced: [],
+        failed: [],
+      });
+    }
+
+    const synced = [];
+    const failed = [];
+
+    console.log(`🔗 Syncing ${unapprovedInstitutions.length} institutions to blockchain...`);
+
+    // Authorize each institution on-chain
+    for (const app of unapprovedInstitutions) {
+      try {
+        console.log(`  ➜ Authorizing: ${app.institutionName} (${app.walletAddress})`);
+
+        const txResult = await blockchainService.authorizeInstitution(
+          app.walletAddress,
+          {
+            name: app.institutionName,
+            registrationNumber: app.registrationNumber,
+            country: app.country,
+          }
+        );
+
+        // Update DB to mark as authorized on-chain
+        app.authorizedOnChain = true;
+        app.blockchainTxHash = txResult.txHash;
+        await app.save();
+
+        synced.push({
+          id: app._id,
+          name: app.institutionName,
+          wallet: app.walletAddress,
+          txHash: txResult.txHash,
+          blockNumber: txResult.blockNumber,
+        });
+
+        console.log(`  ✅ ${app.institutionName} → ${txResult.txHash}`);
+      } catch (err) {
+        failed.push({
+          id: app._id,
+          name: app.institutionName,
+          wallet: app.walletAddress,
+          error: err.message,
+        });
+
+        console.error(`  ❌ ${app.institutionName}: ${err.message}`);
+      }
+    }
+
+    res.json({
+      success: true,
+      message: `Synced ${synced.length} institutions to blockchain.${failed.length > 0 ? ` ${failed.length} failed.` : ""}`,
+      synced,
+      failed,
+    });
+  } catch (err) {
+    console.error("Sync error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /api/admin/stats — Dashboard statistics
 // ─────────────────────────────────────────────────────────────────────────────
 async function getStats(req, res) {
@@ -443,6 +521,7 @@ module.exports = {
   updateChecklist,
   listAuthorizedInstitutions,
   deauthorizeInstitution,
+  syncApprovedInstitutionsToBlockchain,
   getStats,
   getVerificationReport,
   serveDocument,

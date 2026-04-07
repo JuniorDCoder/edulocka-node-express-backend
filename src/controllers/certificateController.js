@@ -71,7 +71,11 @@ async function issueSingle(req, res) {
       issueDate,
       email,
       templateName = "default-certificate",
+      documentMode = req.file ? "upload" : "template",
     } = req.body;
+    const walletAddress = req.walletAddress || null;
+
+    await blockchainService.assertBackendIssuerReady(walletAddress);
 
     // Validate
     const cert = { studentName, studentId, degree, institution, issueDate, email };
@@ -80,42 +84,92 @@ async function issueSingle(req, res) {
       return res.status(400).json({ error: "Validation failed", errors: validation.errors });
     }
 
+    if (documentMode === "upload" && (!req.file || !req.file.buffer)) {
+      return res.status(400).json({ error: "Please upload a PDF certificate document, or switch back to template mode." });
+    }
+
     // Generate cert ID
     const certId = await blockchainService.generateCertificateId();
 
-    // Generate PDF + QR
-    const pdfResult = await pdfService.savePDF(templateName, {
-      ...cert,
-      certId,
-    });
-    const documentHash = ipfsService.computeContentHash(pdfResult.buffer);
+    let pdfResult;
+    let documentHash;
+    let ipfsResult;
 
-    // Upload PDF to IPFS
-    const ipfsResult = await ipfsService.uploadBuffer(
-      pdfResult.buffer,
-      pdfResult.fileName,
-      { certId, type: "certificate", documentHash }
-    );
+    if (documentMode === "upload" && req.file?.buffer) {
+      const sanitizedName = studentName.replace(/[^a-zA-Z0-9\s]/g, "").replace(/\s+/g, "_");
+      const uploadedFileName = `${certId}-${sanitizedName}.pdf`;
+      pdfResult = {
+        fileName: uploadedFileName,
+        filePath: null,
+        size: req.file.buffer.length,
+        buffer: req.file.buffer,
+      };
+      documentHash = ipfsService.computeContentHash(req.file.buffer);
+    } else {
+      // Generate PDF from selected template
+      pdfResult = await pdfService.savePDF(
+        templateName,
+        {
+          ...cert,
+          certId,
+        },
+        {},
+        walletAddress
+      );
+      documentHash = ipfsService.computeContentHash(pdfResult.buffer);
+    }
 
-    // Issue on blockchain
-    const txResult = await blockchainService.issueCertificate({
-      certId,
-      studentName,
-      studentId,
-      degree,
-      institution,
-      issueDate,
-      ipfsHash: ipfsResult.ipfsHash,
-    });
+    // Upload to IPFS (to get hash for blockchain)
+    try {
+      ipfsResult = await ipfsService.uploadBuffer(
+        pdfResult.buffer,
+        pdfResult.fileName,
+        { certId, type: "certificate", documentHash }
+      );
+    } catch (ipfsErr) {
+      console.error("IPFS upload failed:", ipfsErr);
+      return res.status(500).json({ 
+        error: "Failed to upload certificate to IPFS. The blockchain network may be temporarily unavailable. Please try again.",
+        details: ipfsErr.message 
+      });
+    }
+
+    // Issue on blockchain (with IPFS hash)
+    let txResult;
+    try {
+      txResult = await blockchainService.issueCertificate({
+        certId,
+        studentName,
+        studentId,
+        degree,
+        institution,
+        issueDate,
+        ipfsHash: ipfsResult.ipfsHash,
+      });
+    } catch (bcErr) {
+      console.error("Blockchain issuance failed:", bcErr);
+      // Provide specific error message based on error type
+      let errorMsg = "Failed to record certificate on blockchain.";
+      if (bcErr.code === "UNSUPPORTED_OPERATION" || String(bcErr.message).includes("Invalid JSON")) {
+        errorMsg = "Blockchain network is temporarily unavailable or rate limited. Please try again in a moment.";
+      } else if (String(bcErr.message).includes("rate limit")) {
+        errorMsg = "Blockchain provider rate limit exceeded. Please retry after a few seconds.";
+      } else if (String(bcErr.message).includes("insufficient funds")) {
+        errorMsg = "Insufficient gas in issuer wallet. Contact your administrator.";
+      }
+      return res.status(500).json({ 
+        error: errorMsg,
+        details: bcErr.message 
+      });
+    }
 
     // Save QR code
     const qrResult = await qrService.saveQRToFile(certId, { width: 600 });
     const qrDataUrl = await qrService.generateQRDataURL(certId);
 
-    // Send email if requested and configured
-    let emailResult = null;
-    if (email) {
-      emailResult = await emailService.sendCertificateEmail({
+    // Send email if requested and configured (fire-and-forget, don't block response)
+    if (email && emailService.isEmailConfigured()) {
+      emailService.sendCertificateEmail({
         to: email,
         studentName,
         certId,
@@ -124,6 +178,8 @@ async function issueSingle(req, res) {
         issueDate,
         pdfBuffer: pdfResult.buffer,
         pdfFileName: pdfResult.fileName,
+      }).catch((emailErr) => {
+        console.error("Email send failed (non-blocking):", emailErr);
       });
     }
 
@@ -143,7 +199,7 @@ async function issueSingle(req, res) {
       },
       pdf: {
         fileName: pdfResult.fileName,
-        url: `/output/certificates/${pdfResult.fileName}`,
+        url: `/api/certificates/${certId}/pdf`,
       },
       qr: {
         fileName: qrResult.fileName,
@@ -151,7 +207,7 @@ async function issueSingle(req, res) {
         dataUrl: qrDataUrl,
       },
       verifyUrl: qrService.getVerifyUrl(certId),
-      email: emailResult,
+      message: email && emailService.isEmailConfigured() ? "Certificate issued and email will be sent shortly." : "Certificate issued successfully."
     });
   } catch (err) {
     console.error("Issue single error:", err);
@@ -433,6 +489,31 @@ async function previewTemplate(req, res) {
   }
 }
 
+// GET /api/templates/:templateId
+// Returns the HTML content of a template by ID
+async function getTemplate(req, res) {
+  try {
+    const { templateId } = req.params;
+    const walletAddress = req.walletAddress || null;
+
+    if (!templateId) {
+      return res.status(400).json({ error: "templateId is required" });
+    }
+
+    // Load template HTML from pdfService (handles both default and institution templates)
+    const html = await pdfService.loadTemplateHTML(templateId, walletAddress);
+
+    if (!html) {
+      return res.status(404).json({ error: `Template "${templateId}" not found` });
+    }
+
+    res.json({ html, templateId });
+  } catch (err) {
+    console.error("Get template error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // QR CODE ENDPOINTS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -571,6 +652,7 @@ module.exports = {
   generatePDF,
   uploadTemplate,
   listTemplates,
+  getTemplate,
   previewTemplate,
   getQRCode,
   bulkExportQR,

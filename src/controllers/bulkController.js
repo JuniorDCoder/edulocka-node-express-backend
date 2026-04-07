@@ -15,6 +15,7 @@ const ipfsService = require("../services/ipfsService");
 const pdfService = require("../services/pdfService");
 const qrService = require("../services/qrService");
 const emailService = require("../services/emailService");
+const { isServerlessRuntime } = require("../utils/runtimePaths");
 
 // ── In-memory job store (use Redis/DB in production) ────────────────────────
 const jobs = new Map();
@@ -92,6 +93,7 @@ async function uploadCSV(req, res) {
 async function processBatch(req, res) {
   try {
     const { jobId, templateName = "default-certificate", sendEmails = false } = req.body;
+    const walletAddress = req.walletAddress || null;
 
     if (!jobId) {
       return res.status(400).json({ error: "jobId is required" });
@@ -108,14 +110,33 @@ async function processBatch(req, res) {
       return res.status(400).json({ error: "No valid records to process" });
     }
 
+    await blockchainService.assertBackendIssuerReady(walletAddress);
+    pdfService.loadTemplate(templateName, walletAddress);
+
     // Mark as processing
     job.status = "processing";
+    job.walletAddress = walletAddress;
     job.progress = {
       phase: "starting",
       current: 0,
       total: job.records.length,
       percent: 0,
     };
+
+    if (isServerlessRuntime()) {
+      await processPipeline(job, templateName, sendEmails, walletAddress);
+      return res.json({
+        jobId,
+        status: job.status,
+        totalRecords: job.records.length,
+        createdAt: job.createdAt,
+        completedAt: job.completedAt,
+        progress: job.progress,
+        summary: job.summary,
+        results: job.results,
+        message: "Processing completed in-request for serverless runtime.",
+      });
+    }
 
     // Respond immediately — processing continues in background
     res.json({
@@ -126,7 +147,7 @@ async function processBatch(req, res) {
     });
 
     // ── Run the pipeline in background ────────────────────────────────────
-    processPipeline(job, templateName, sendEmails).catch((err) => {
+    processPipeline(job, templateName, sendEmails, walletAddress).catch((err) => {
       console.error(`Job ${jobId} pipeline error:`, err);
       job.status = "failed";
       job.error = err.message;
@@ -139,7 +160,7 @@ async function processBatch(req, res) {
 
 // ── The Processing Pipeline ─────────────────────────────────────────────────
 
-async function processPipeline(job, templateName, sendEmails) {
+async function processPipeline(job, templateName, sendEmails, walletAddress = null) {
   const certs = job.records;
   const results = [];
 
@@ -152,64 +173,108 @@ async function processPipeline(job, templateName, sendEmails) {
     }
   }
 
-  // PHASE 2: Generate PDFs + QR codes
+  // PHASE 2: Generate PDFs (keep in memory, don't upload yet)
   job.progress = { phase: "generating_pdfs", current: 0, total: certs.length, percent: 0 };
 
   const pdfResults = await pdfService.bulkGeneratePDFs(templateName, certs, (p) => {
     job.progress = { phase: "generating_pdfs", ...p };
-  });
+  }, walletAddress);
 
-  // PHASE 3: Upload PDFs to IPFS
-  job.progress = { phase: "uploading_ipfs", current: 0, total: certs.length, percent: 0 };
+  // PHASE 3: Issue on blockchain FIRST (before IPFS upload)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // Only upload to IPFS for certificates that succeed on blockchain
+  job.progress = { phase: "blockchain_issuance", current: 0, total: certs.length, percent: 0 };
 
-  for (let i = 0; i < certs.length; i++) {
+  let blockchainResults;
+  try {
+    blockchainResults = await blockchainService.issueBatch(certs, (p) => {
+      job.progress = { phase: "blockchain_issuance", ...p };
+    });
+  } catch (err) {
+    // Handle critical blockchain service errors (e.g., rate limits, network issues)
+    console.error("Critical blockchain service error:", err.message);
+    
+    // Log diagnostic info for rate limiting
+    if (err.message.includes("rate") || err.message.includes("rate limit")) {
+      console.error("🚨 RATE LIMIT DETECTED - Consider:");
+      console.error("   1. Upgrading Infura plan from free to paid");
+      console.error("   2. Using a different RPC provider (Alchemy, QuickNode)");
+      console.error("   3. Reducing batch size (max 50 certs per batch)");
+    }
+    
+    if (err.message.includes("Invalid JSON") || err.message.includes("UNSUPPORTED_OPERATION")) {
+      console.error("🚨 RPC PROVIDER RETURNED INVALID JSON - May indicate:");
+      console.error("   1. Infura service temporarily down");
+      console.error("   2. Rate limiting (too many requests per second)");
+      console.error("   3. Network configuration issue");
+    }
+    
+    // Treat all as failed if service is down
+    const failedResults = certs.map((c, i) => ({
+      index: i,
+      certId: c.certId,
+      status: "failed",
+      error: err.message || "Blockchain service unavailable",
+    }));
+    blockchainResults = { results: failedResults, succeeded: 0, failed: certs.length, total: certs.length };
+  }
+
+  // PHASE 4: Upload to IPFS (only for successful blockchain certs)
+  job.progress = { phase: "uploading_ipfs", current: 0, total: blockchainResults.succeeded, percent: 0 };
+
+  let ipfsUploadCount = 0;
+  for (let i = 0; i < blockchainResults.results.length; i++) {
+    const bcResult = blockchainResults.results[i];
+    const cert = certs[i];
     const pdfResult = pdfResults[i];
-    if (pdfResult.status === "success" && pdfResult.buffer) {
+
+    // Only upload to IPFS if blockchain issuance succeeded
+    if (bcResult.status === "success" && pdfResult?.status === "success" && pdfResult.buffer) {
       try {
         const documentHash = ipfsService.computeContentHash(pdfResult.buffer);
-        certs[i].documentHash = documentHash;
+        cert.documentHash = documentHash;
         const ipfsResult = await ipfsService.uploadBuffer(
           pdfResult.buffer,
           pdfResult.fileName,
-          { certId: certs[i].certId, type: "certificate", documentHash }
+          { certId: cert.certId, type: "certificate", documentHash }
         );
-        certs[i].ipfsHash = ipfsResult.ipfsHash;
-        certs[i].ipfsPinned = ipfsResult.pinned;
-        certs[i].ipfsGateway = ipfsResult.gateway;
+        cert.ipfsHash = ipfsResult.ipfsHash;
+        cert.ipfsPinned = ipfsResult.pinned;
+        cert.ipfsGateway = ipfsResult.gateway;
+        ipfsUploadCount++;
       } catch (err) {
-        certs[i].ipfsHash = "";
-        certs[i].ipfsError = err.message;
+        cert.ipfsHash = "";
+        cert.ipfsError = err.message;
+        console.error(`IPFS upload failed for cert ${cert.certId}:`, err.message);
       }
+    } else if (bcResult.status !== "success") {
+      // Blockchain failed — skip IPFS upload entirely
+      cert.ipfsHash = "";
+      cert.ipfsError = "Skipped (blockchain issuance failed)";
     }
+
     job.progress = {
       phase: "uploading_ipfs",
-      current: i + 1,
-      total: certs.length,
-      percent: Math.round(((i + 1) / certs.length) * 100),
+      current: ipfsUploadCount + 1,
+      total: blockchainResults.succeeded || 1,
+      percent: Math.round((ipfsUploadCount / (blockchainResults.succeeded || 1)) * 100),
     };
   }
 
-  // PHASE 4: Issue on blockchain
-  job.progress = { phase: "blockchain_issuance", current: 0, total: certs.length, percent: 0 };
-
-  const blockchainResults = await blockchainService.issueBatch(certs, (p) => {
-    job.progress = { phase: "blockchain_issuance", ...p };
-  });
-
-  // PHASE 5: Generate QR codes
-  job.progress = { phase: "generating_qrcodes", current: 0, total: certs.length, percent: 0 };
+  // PHASE 5: Generate QR codes (only for successful blockchain certs)
+  job.progress = { phase: "generating_qrcodes", current: 0, total: blockchainResults.succeeded, percent: 0 };
 
   const successfulCerts = certs.filter((c, i) => blockchainResults.results[i]?.status === "success");
   const qrResults = await qrService.bulkGenerateQR(successfulCerts);
 
-  // PHASE 6: Send emails (if enabled)
+  // PHASE 6: Send emails (if enabled and blockchain succeeded)
   let emailResults = null;
   if (sendEmails && emailService.isEmailConfigured()) {
-    job.progress = { phase: "sending_emails", current: 0, total: successfulCerts.length, percent: 0 };
+    job.progress = { phase: "sending_emails", current: 0, total: successfulCerts.filter((c) => c.email).length, percent: 0 };
 
     const emailJobs = successfulCerts
       .filter((c) => c.email)
-      .map((c, i) => ({
+      .map((c) => ({
         to: c.email,
         studentName: c.studentName,
         certId: c.certId,
@@ -258,6 +323,7 @@ async function processPipeline(job, templateName, sendEmails) {
         documentHash: cert.documentHash || null,
         pinned: cert.ipfsPinned || false,
         gateway: cert.ipfsGateway || null,
+        error: cert.ipfsError || null,
       },
       qr: {
         status: qrResult?.status || "skipped",

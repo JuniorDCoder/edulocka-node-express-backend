@@ -60,6 +60,9 @@ router.get("/institutions", adminController.listAuthorizedInstitutions);
 // Deauthorize an institution (removes from blockchain)
 router.post("/deauthorize/:address", adminController.deauthorizeInstitution);
 
+// Sync approved institutions from DB to blockchain (fixes missing on-chain authorizations)
+router.post("/sync-to-blockchain", adminController.syncApprovedInstitutionsToBlockchain);
+
 // ── Dashboard Stats ─────────────────────────────────────────────────────────
 /**
  * @openapi

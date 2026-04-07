@@ -68,6 +68,20 @@ const certificateVerifyUpload = multer({
   limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
 });
 
+const certificateIssueUpload = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const isPdf = ext === ".pdf" || file.mimetype === "application/pdf";
+    if (isPdf) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only PDF certificate files are allowed for backend issuance"));
+    }
+  },
+  limits: { fileSize: 20 * 1024 * 1024 },
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // BULK ISSUANCE ENDPOINTS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -76,7 +90,7 @@ const certificateVerifyUpload = multer({
 router.post("/bulk/upload", csvUpload.single("file"), bulkController.uploadCSV);
 
 // Process the validated batch → issues on blockchain, generates PDFs, etc.
-router.post("/bulk/process", bulkController.processBatch);
+router.post("/bulk/process", requireWalletAuth, bulkController.processBatch);
 
 // Get status of an in-progress bulk job
 router.get("/bulk/status/:jobId", bulkController.getJobStatus);
@@ -203,6 +217,9 @@ router.post(
  */
 router.get("/templates", optionalWalletAuth, certificateController.listTemplates);
 
+// Get a single template by ID (returns HTML)
+router.get("/templates/:templateId", optionalWalletAuth, certificateController.getTemplate);
+
 // Preview a template with sample data (optional auth for institution templates)
 router.post("/templates/preview", optionalWalletAuth, certificateController.previewTemplate);
 
@@ -238,7 +255,12 @@ router.post("/templates/preview", optionalWalletAuth, certificateController.prev
  *       400:
  *         description: Validation error
  */
-router.post("/certificates/issue", certificateController.issueSingle);
+router.post(
+  "/certificates/issue",
+  requireWalletAuth,
+  certificateIssueUpload.single("document"),
+  certificateController.issueSingle
+);
 
 // Verify a certificate by ID
 /**
