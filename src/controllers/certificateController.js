@@ -725,6 +725,23 @@ async function getCertificateData(req, res) {
       return res.status(404).json({ error: "Certificate not found" });
     }
 
+    // Attempt to get txHash from events as a last resort
+    let fallbackTxHash = "unknown";
+    let fallbackBlockNumber = 0;
+    try {
+      const provider = blockchainService.getProvider();
+      const contract = blockchainService.getReadContract();
+      const filter = contract.filters.CertificateIssued(certId);
+      const currentBlock = await provider.getBlockNumber();
+      const events = await contract.queryFilter(filter, currentBlock - 5000, currentBlock);
+      if (events.length > 0) {
+        fallbackTxHash = events[0].transactionHash;
+        fallbackBlockNumber = events[0].blockNumber;
+      }
+    } catch (e) {
+      console.warn(`Fallback event lookup failed for ${certId}:`, e.message);
+    }
+
     res.json({
       certId,
       studentName: cert.studentName,
@@ -735,11 +752,13 @@ async function getCertificateData(req, res) {
       status: cert.isValid ? "issued" : "revoked",
       ipfsHash: cert.ipfsHash,
       blockchain: {
-        txHash: "unknown",
-        blockNumber: 0, // Warning: unknown block number from blockchain fallback
+        txHash: fallbackTxHash,
+        blockNumber: fallbackBlockNumber, // May still be 0 if fallback fails
         gasUsed: 0,
       },
-      warning: "Certificate data retrieved from blockchain only; block number may be incomplete. Please re-issue or verify with backend admin.",
+      warning: fallbackBlockNumber > 0 
+        ? "Certificate data retrieved from blockchain. Database record missing."
+        : "Certificate data retrieved from blockchain only; block number may be incomplete. Please re-issue or verify with backend admin.",
     });
   } catch (err) {
     console.error("Get certificate data error:", err);
