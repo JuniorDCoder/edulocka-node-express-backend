@@ -135,7 +135,24 @@ function resolveBrowserExecutablePath() {
 }
 
 async function launchBrowser() {
-  const executablePath = resolveBrowserExecutablePath();
+  let executablePath = resolveBrowserExecutablePath();
+  
+  // If no executable found, try to install it once
+  if (!executablePath) {
+    console.log("[puppeteer] No browser found. Attempting to install chrome...");
+    try {
+      const { spawnSync } = require("child_process");
+      const command = process.platform === "win32" ? "npx.cmd" : "npx";
+      spawnSync(command, ["puppeteer", "browsers", "install", "chrome"], {
+        stdio: "inherit",
+        cwd: path.join(__dirname, "..", ".."),
+      });
+      executablePath = resolveBrowserExecutablePath();
+    } catch (installErr) {
+      console.error("[puppeteer] Auto-install failed:", installErr.message);
+    }
+  }
+
   const launchOptions = {
     headless: true,
     args: [

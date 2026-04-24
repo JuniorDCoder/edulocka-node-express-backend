@@ -15,6 +15,7 @@ const ipfsService = require("../services/ipfsService");
 const pdfService = require("../services/pdfService");
 const qrService = require("../services/qrService");
 const emailService = require("../services/emailService");
+const Certificate = require("../models/Certificate");
 const { isServerlessRuntime } = require("../utils/runtimePaths");
 
 // ── In-memory job store (use Redis/DB in production) ────────────────────────
@@ -180,56 +181,18 @@ async function processPipeline(job, templateName, sendEmails, walletAddress = nu
     job.progress = { phase: "generating_pdfs", ...p };
   }, walletAddress);
 
-  // PHASE 3: Issue on blockchain FIRST (before IPFS upload)
+  // PHASE 3: Upload to IPFS FIRST (before blockchain issuance)
   // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // Only upload to IPFS for certificates that succeed on blockchain
-  job.progress = { phase: "blockchain_issuance", current: 0, total: certs.length, percent: 0 };
-
-  let blockchainResults;
-  try {
-    blockchainResults = await blockchainService.issueBatch(certs, (p) => {
-      job.progress = { phase: "blockchain_issuance", ...p };
-    });
-  } catch (err) {
-    // Handle critical blockchain service errors (e.g., rate limits, network issues)
-    console.error("Critical blockchain service error:", err.message);
-    
-    // Log diagnostic info for rate limiting
-    if (err.message.includes("rate") || err.message.includes("rate limit")) {
-      console.error("🚨 RATE LIMIT DETECTED - Consider:");
-      console.error("   1. Upgrading Infura plan from free to paid");
-      console.error("   2. Using a different RPC provider (Alchemy, QuickNode)");
-      console.error("   3. Reducing batch size (max 50 certs per batch)");
-    }
-    
-    if (err.message.includes("Invalid JSON") || err.message.includes("UNSUPPORTED_OPERATION")) {
-      console.error("🚨 RPC PROVIDER RETURNED INVALID JSON - May indicate:");
-      console.error("   1. Infura service temporarily down");
-      console.error("   2. Rate limiting (too many requests per second)");
-      console.error("   3. Network configuration issue");
-    }
-    
-    // Treat all as failed if service is down
-    const failedResults = certs.map((c, i) => ({
-      index: i,
-      certId: c.certId,
-      status: "failed",
-      error: err.message || "Blockchain service unavailable",
-    }));
-    blockchainResults = { results: failedResults, succeeded: 0, failed: certs.length, total: certs.length };
-  }
-
-  // PHASE 4: Upload to IPFS (only for successful blockchain certs)
-  job.progress = { phase: "uploading_ipfs", current: 0, total: blockchainResults.succeeded, percent: 0 };
+  // Smart contract requires ipfsHash to be non-empty, so we must upload PDFs to IPFS
+  // before attempting blockchain issuance
+  job.progress = { phase: "uploading_ipfs", current: 0, total: certs.length, percent: 0 };
 
   let ipfsUploadCount = 0;
-  for (let i = 0; i < blockchainResults.results.length; i++) {
-    const bcResult = blockchainResults.results[i];
+  for (let i = 0; i < certs.length; i++) {
     const cert = certs[i];
     const pdfResult = pdfResults[i];
 
-    // Only upload to IPFS if blockchain issuance succeeded
-    if (bcResult.status === "success" && pdfResult?.status === "success" && pdfResult.buffer) {
+    if (pdfResult?.status === "success" && pdfResult.buffer) {
       try {
         const documentHash = ipfsService.computeContentHash(pdfResult.buffer);
         cert.documentHash = documentHash;
@@ -241,24 +204,134 @@ async function processPipeline(job, templateName, sendEmails, walletAddress = nu
         cert.ipfsHash = ipfsResult.ipfsHash;
         cert.ipfsPinned = ipfsResult.pinned;
         cert.ipfsGateway = ipfsResult.gateway;
+        
+        console.log(`✅ IPFS uploaded: ${cert.certId} → ${ipfsResult.ipfsHash}`);
         ipfsUploadCount++;
       } catch (err) {
-        cert.ipfsHash = "";
+        // IPFS upload failed — mark certificate for failure
+        cert.ipfsHash = null;
         cert.ipfsError = err.message;
-        console.error(`IPFS upload failed for cert ${cert.certId}:`, err.message);
+        console.error(`❌ IPFS upload failed for cert ${cert.certId}:`, err.message);
       }
-    } else if (bcResult.status !== "success") {
-      // Blockchain failed — skip IPFS upload entirely
-      cert.ipfsHash = "";
-      cert.ipfsError = "Skipped (blockchain issuance failed)";
+    } else if (pdfResult?.status !== "success") {
+      cert.ipfsHash = null;
+      cert.ipfsError = "PDF generation failed";
     }
 
     job.progress = {
       phase: "uploading_ipfs",
-      current: ipfsUploadCount + 1,
-      total: blockchainResults.succeeded || 1,
-      percent: Math.round((ipfsUploadCount / (blockchainResults.succeeded || 1)) * 100),
+      current: i + 1,
+      total: certs.length,
+      percent: Math.round(((i + 1) / certs.length) * 100),
     };
+  }
+
+  // PHASE 4: Issue on blockchain (with ipfsHash now available)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // Now blockchain issuance will have ipfsHash ready
+  job.progress = { phase: "blockchain_issuance", current: 0, total: certs.length, percent: 0 };
+
+  // Filter out certificates that failed IPFS upload (no ipfsHash means blockchain will fail anyway)
+  const certsReadyForBlockchain = certs.filter(c => c.ipfsHash);
+  const certsFailed = certs.filter(c => !c.ipfsHash);
+
+  let blockchainResults;
+  try {
+    blockchainResults = await blockchainService.issueBatch(certsReadyForBlockchain, (p) => {
+      job.progress = { phase: "blockchain_issuance", ...p };
+    });
+  } catch (err) {
+    // Handle critical blockchain service errors (e.g., rate limits, network issues)
+    console.error("Critical blockchain service error:", err.message);
+    
+    // Log diagnostic info for rate limiting
+    if (err.message.includes("rate") || err.message.includes("rate limit")) {
+      console.error("🚨 RATE LIMIT DETECTED - Consider:");
+      console.error("   1. Upgrading Alchemy plan");
+      console.error("   2. Reducing batch size (max 50 certs per batch)");
+      console.error("   3. Retrying in 30 seconds");
+    }
+    
+    if (err.message.includes("Invalid JSON") || err.message.includes("UNSUPPORTED_OPERATION")) {
+      console.error("🚨 RPC PROVIDER RETURNED INVALID JSON - May indicate:");
+      console.error("   1. RPC provider service issue");
+      console.error("   2. Rate limiting (too many requests per second)");
+      console.error("   3. Network configuration issue");
+    }
+    
+    // Treat all as failed if service is down
+    const failedResults = certsReadyForBlockchain.map((c, i) => ({
+      index: i,
+      certId: c.certId,
+      status: "failed",
+      error: err.message || "Blockchain service unavailable",
+    }));
+    blockchainResults = { results: failedResults, succeeded: 0, failed: certsReadyForBlockchain.length, total: certsReadyForBlockchain.length };
+  }
+
+  // PHASE 5: Save blockchain results to database
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  job.progress = { phase: "saving_database", current: 0, total: certs.length, percent: 0 };
+
+  for (let i = 0; i < blockchainResults.results.length; i++) {
+    const bcResult = blockchainResults.results[i];
+    const cert = certsReadyForBlockchain[i];
+
+    if (bcResult.status === "success") {
+      try {
+        await Certificate.create({
+          certId: cert.certId,
+          studentName: cert.studentName,
+          studentId: cert.studentId || null,
+          degree: cert.degree,
+          institution: cert.institution,
+          issueDate: new Date(cert.issueDate),
+          studentWallet: walletAddress || null,
+          blockchain: {
+            txHash: bcResult.txHash,
+            blockNumber: bcResult.blockNumber,
+            gasUsed: bcResult.gasUsed,
+            issuedAt: new Date(),
+          },
+          ipfs: {
+            documentHash: cert.documentHash || null,
+            ipfsHash: cert.ipfsHash || null,
+            pinned: cert.ipfsPinned || false,
+            gateway: cert.ipfsGateway || null,
+          },
+          qr: {
+            saved: false,
+            filePath: null,
+          },
+          email: {
+            sent: false,
+            sentAt: null,
+            error: null,
+          },
+        });
+        console.log(`✅ Bulk cert ${cert.certId} saved to database with block number ${bcResult.blockNumber}`);
+      } catch (dbErr) {
+        console.warn(`⚠️  Failed to save bulk cert ${cert.certId} to database (non-blocking):`, dbErr.message);
+      }
+    }
+
+    job.progress = {
+      phase: "saving_database",
+      current: i + 1,
+      total: blockchainResults.results.length,
+      percent: Math.round(((i + 1) / blockchainResults.results.length) * 100),
+    };
+  }
+
+  // Track IPFS-failed certs separately
+  for (const cert of certsFailed) {
+    blockchainResults.results.push({
+      index: certs.indexOf(cert),
+      certId: cert.certId,
+      status: "failed",
+      error: `IPFS upload failed: ${cert.ipfsError}`,
+    });
+    blockchainResults.failed++;
   }
 
   // PHASE 5: Generate QR codes (only for successful blockchain certs)

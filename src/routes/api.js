@@ -292,6 +292,12 @@ router.post(
 // Generate PDF for an existing certificate
 router.get("/certificates/:certId/pdf", certificateController.generatePDF);
 
+// Get certificate data (with actual block number from database)
+router.get("/certificates/:certId/data", certificateController.getCertificateData);
+
+// List certificates (by wallet address, etc.)
+router.get("/certificates", certificateController.listCertificates);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // QR CODE ENDPOINTS
 // ─────────────────────────────────────────────────────────────────────────────

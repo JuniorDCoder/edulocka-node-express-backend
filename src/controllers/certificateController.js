@@ -13,6 +13,7 @@ const pdfService = require("../services/pdfService");
 const qrService = require("../services/qrService");
 const emailService = require("../services/emailService");
 const { validateCertificate } = require("../utils/validator");
+const Certificate = require("../models/Certificate");
 
 const TEMPLATES_DIR = path.join(__dirname, "..", "..", "templates");
 
@@ -166,6 +167,44 @@ async function issueSingle(req, res) {
     // Save QR code
     const qrResult = await qrService.saveQRToFile(certId, { width: 600 });
     const qrDataUrl = await qrService.generateQRDataURL(certId);
+
+    // Save certificate metadata to database
+    try {
+      await Certificate.create({
+        certId,
+        studentName,
+        studentId,
+        degree,
+        institution,
+        issueDate: new Date(issueDate),
+        studentWallet: walletAddress,
+        blockchain: {
+          txHash: txResult.txHash,
+          blockNumber: txResult.blockNumber,
+          gasUsed: txResult.gasUsed,
+          issuedAt: new Date(),
+        },
+        ipfs: {
+          documentHash,
+          ipfsHash: ipfsResult.ipfsHash,
+          pinned: ipfsResult.pinned,
+          gateway: ipfsResult.gateway,
+        },
+        qr: {
+          saved: qrResult !== null,
+          filePath: qrResult?.filePath || null,
+        },
+        email: {
+          sent: email && emailService.isEmailConfigured() ? true : false,
+          sentAt: null,
+          error: null,
+        },
+      });
+      console.log(`✅ Certificate ${certId} saved to database with block number ${txResult.blockNumber}`);
+    } catch (dbErr) {
+      console.warn(`⚠️  Failed to save certificate ${certId} to database (non-blocking):`, dbErr.message);
+      // Don't fail the response if database save fails - certificate is already on blockchain
+    }
 
     // Send email if requested and configured (fire-and-forget, don't block response)
     if (email && emailService.isEmailConfigured()) {
@@ -645,6 +684,94 @@ async function bulkSendEmails(req, res) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET CERTIFICATE DATA (from database with actual block number)
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/certificates/:certId/data
+// Returns certificate metadata including the actual blockchain block number
+
+async function getCertificateData(req, res) {
+  try {
+    const { certId } = req.params;
+
+    // First, try to get from database (preferred - has actual block number)
+    const dbCert = await Certificate.findOne({ certId });
+    if (dbCert) {
+      return res.json({
+        certId: dbCert.certId,
+        studentName: dbCert.studentName,
+        studentId: dbCert.studentId,
+        studentWallet: dbCert.studentWallet,
+        degree: dbCert.degree,
+        institution: dbCert.institution,
+        issueDate: dbCert.issueDate,
+        status: dbCert.status,
+        blockchain: {
+          txHash: dbCert.blockchain.txHash,
+          blockNumber: dbCert.blockchain.blockNumber,
+          gasUsed: dbCert.blockchain.gasUsed,
+          issuedAt: dbCert.blockchain.issuedAt,
+        },
+        ipfs: dbCert.ipfs,
+        qr: dbCert.qr,
+        email: dbCert.email,
+        createdAt: dbCert.createdAt,
+      });
+    }
+
+    // Fallback: Query blockchain and reconstruct (won't have block number if event lookup fails)
+    const cert = await blockchainService.verifyCertificate(certId);
+    if (!cert.exists) {
+      return res.status(404).json({ error: "Certificate not found" });
+    }
+
+    res.json({
+      certId,
+      studentName: cert.studentName,
+      studentWallet: cert.issuer,
+      degree: cert.degree,
+      institution: cert.institution,
+      issueDate: new Date(Number(cert.issueDate) * 1000).toISOString().split("T")[0],
+      status: cert.isValid ? "issued" : "revoked",
+      ipfsHash: cert.ipfsHash,
+      blockchain: {
+        txHash: "unknown",
+        blockNumber: 0, // Warning: unknown block number from blockchain fallback
+        gasUsed: 0,
+      },
+      warning: "Certificate data retrieved from blockchain only; block number may be incomplete. Please re-issue or verify with backend admin.",
+    });
+  } catch (err) {
+    console.error("Get certificate data error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+async function listCertificates(req, res) {
+  try {
+    const { wallet, txHash } = req.query;
+    const query = {};
+
+    if (wallet) {
+      query.studentWallet = { $regex: new RegExp(`^${wallet}$`, "i") };
+    }
+
+    if (txHash) {
+      query["blockchain.txHash"] = { $regex: new RegExp(`^${txHash}$`, "i") };
+    }
+
+    if (Object.keys(query).length === 0) {
+      return res.status(400).json({ error: "wallet or txHash query parameter is required" });
+    }
+
+    const certificates = await Certificate.find(query).sort({ createdAt: -1 });
+    res.json(certificates);
+  } catch (err) {
+    console.error("List certificates error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
 module.exports = {
   issueSingle,
   verifyCertificate,
@@ -658,4 +785,6 @@ module.exports = {
   bulkExportQR,
   sendEmail,
   bulkSendEmails,
+  getCertificateData,
+  listCertificates,
 };
