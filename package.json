@@ -4,6 +4,7 @@
   "description": "Edulocka Backend — Bulk certificate issuance, PDF generation, email delivery, QR codes",
   "main": "src/server.js",
   "scripts": {
+    "build": "npx puppeteer browsers install chrome",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "postinstall": "node scripts/ensure-puppeteer-browser.js",
