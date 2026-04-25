@@ -4,18 +4,25 @@
 // Uses Puppeteer to render HTML templates into pixel-perfect PDFs
 // Supports custom HTML templates with Handlebars placeholders
 
-const puppeteer = require("puppeteer");
-const Handlebars = require("handlebars");
-const { PDFDocument } = require("pdf-lib");
 const fs = require("fs");
 const path = require("path");
+const Handlebars = require("handlebars");
+const { PDFDocument } = require("pdf-lib");
 const qrService = require("./qrService");
 const {
   ensureDirSync,
+  getBackendRoot,
   getCertificatesOutputDir,
   getInstitutionTemplatesDir,
   getTemplatesDir,
+  isServerlessRuntime,
 } = require("../utils/runtimePaths");
+
+const LOCAL_PUPPETEER_CACHE_DIR =
+  process.env.PUPPETEER_CACHE_DIR || path.join(getBackendRoot(), ".cache", "puppeteer");
+process.env.PUPPETEER_CACHE_DIR = LOCAL_PUPPETEER_CACHE_DIR;
+
+const puppeteer = require("puppeteer");
 
 const TEMPLATES_DIR = getTemplatesDir();
 const INSTITUTION_TEMPLATES_DIR = getInstitutionTemplatesDir();
@@ -34,6 +41,38 @@ const COMMON_BROWSER_PATHS = [
   "/opt/google/chrome/chrome",
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
 ];
+
+function findBrowserBinaryInCache(rootDir) {
+  if (!rootDir || !fs.existsSync(rootDir)) return null;
+
+  const targetNames = new Set(["chrome", "chromium", "chrome-headless-shell"]);
+  const stack = [{ dir: rootDir, depth: 0 }];
+
+  while (stack.length > 0) {
+    const { dir, depth } = stack.pop();
+    if (depth > 8) continue;
+
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push({ dir: fullPath, depth: depth + 1 });
+        continue;
+      }
+      if (entry.isFile() && targetNames.has(entry.name)) {
+        return fullPath;
+      }
+    }
+  }
+
+  return null;
+}
 
 // ── Register Handlebars helpers ─────────────────────────────────────────────
 
@@ -131,14 +170,19 @@ function resolveBrowserExecutablePath() {
     }
   }
 
+  const cachedBinary = findBrowserBinaryInCache(LOCAL_PUPPETEER_CACHE_DIR);
+  if (cachedBinary) {
+    return cachedBinary;
+  }
+
   return null;
 }
 
 async function launchBrowser() {
   let executablePath = resolveBrowserExecutablePath();
   
-  // If no executable found, try to install it once
-  if (!executablePath) {
+  // If no executable found, try to install it once (non-serverless only)
+  if (!executablePath && !isServerlessRuntime()) {
     console.log("[puppeteer] No browser found. Attempting to install chrome...");
     try {
       const { spawnSync } = require("child_process");
@@ -146,6 +190,10 @@ async function launchBrowser() {
       spawnSync(command, ["puppeteer", "browsers", "install", "chrome"], {
         stdio: "inherit",
         cwd: path.join(__dirname, "..", ".."),
+        env: {
+          ...process.env,
+          PUPPETEER_CACHE_DIR: LOCAL_PUPPETEER_CACHE_DIR,
+        },
       });
       executablePath = resolveBrowserExecutablePath();
     } catch (installErr) {
@@ -170,7 +218,11 @@ async function launchBrowser() {
       ? `Resolved browser path: ${executablePath}.`
       : "No browser executable was found in Puppeteer's cache, the configured env vars, or the common system paths checked by Edulocka.";
 
-    err.message = `${err.message} ${details} Set PUPPETEER_EXECUTABLE_PATH (or CHROME_BIN) to a valid Chrome/Chromium binary, or run "npx puppeteer browsers install chrome" during deployment.`;
+    const deployHint = isServerlessRuntime()
+      ? ` Serverless runtime detected. During build, install Chrome into a project-local cache (PUPPETEER_CACHE_DIR=${LOCAL_PUPPETEER_CACHE_DIR}) and ensure that path is available at runtime.`
+      : "";
+
+    err.message = `${err.message} ${details}${deployHint} Set PUPPETEER_EXECUTABLE_PATH (or CHROME_BIN) to a valid Chrome/Chromium binary, or run "npx puppeteer browsers install chrome" during deployment.`;
     throw err;
   }
 }

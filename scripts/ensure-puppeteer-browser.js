@@ -1,5 +1,10 @@
 const fs = require("fs");
+const path = require("path");
 const { spawnSync } = require("child_process");
+
+const LOCAL_PUPPETEER_CACHE_DIR =
+  process.env.PUPPETEER_CACHE_DIR || path.join(__dirname, "..", ".cache", "puppeteer");
+process.env.PUPPETEER_CACHE_DIR = LOCAL_PUPPETEER_CACHE_DIR;
 
 const BROWSER_ENV_VARS = [
   "PUPPETEER_EXECUTABLE_PATH",
@@ -44,9 +49,12 @@ function resolveExistingBrowserPath() {
 }
 
 function main() {
+  fs.mkdirSync(LOCAL_PUPPETEER_CACHE_DIR, { recursive: true });
+
   const existingPath = resolveExistingBrowserPath();
   if (existingPath) {
     console.log(`[puppeteer] Using browser at ${existingPath}`);
+    console.log(`[puppeteer] Cache dir: ${LOCAL_PUPPETEER_CACHE_DIR}`);
     return;
   }
 
@@ -58,6 +66,10 @@ function main() {
   const command = process.platform === "win32" ? "npx.cmd" : "npx";
   const install = spawnSync(command, ["puppeteer", "browsers", "install", "chrome"], {
     stdio: "inherit",
+    env: {
+      ...process.env,
+      PUPPETEER_CACHE_DIR: LOCAL_PUPPETEER_CACHE_DIR,
+    },
   });
 
   if (install.status !== 0) {
@@ -71,6 +83,7 @@ function main() {
   }
 
   console.log(`[puppeteer] Installed browser at ${installedPath}`);
+  console.log(`[puppeteer] Cache dir: ${LOCAL_PUPPETEER_CACHE_DIR}`);
 }
 
 main();
