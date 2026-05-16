@@ -783,10 +783,24 @@ async function listCertificates(req, res) {
       return res.status(400).json({ error: "wallet or txHash query parameter is required" });
     }
 
-    const certificates = await Certificate.find(query).sort({ createdAt: -1 });
+    const certificates = await Certificate.find(query).sort({ createdAt: -1 }).limit(100);
     res.json(certificates);
   } catch (err) {
     console.error("List certificates error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+async function listRecentCertificates(req, res) {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 10, 50);
+    const certificates = await Certificate.find({})
+      .sort({ createdAt: -1 })
+      .limit(limit);
+    
+    res.json(certificates);
+  } catch (err) {
+    console.error("List recent certificates error:", err);
     res.status(500).json({ error: err.message });
   }
 }
@@ -806,4 +820,5 @@ module.exports = {
   bulkSendEmails,
   getCertificateData,
   listCertificates,
+  listRecentCertificates,
 };

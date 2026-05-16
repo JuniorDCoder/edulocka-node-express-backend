@@ -298,6 +298,9 @@ router.get("/certificates/:certId/data", certificateController.getCertificateDat
 // List certificates (by wallet address, etc.)
 router.get("/certificates", certificateController.listCertificates);
 
+// Get most recently issued certificates across the platform
+router.get("/certificates/recent", certificateController.listRecentCertificates);
+
 // ─────────────────────────────────────────────────────────────────────────────
 // QR CODE ENDPOINTS
 // ─────────────────────────────────────────────────────────────────────────────
