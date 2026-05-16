@@ -265,7 +265,26 @@ async function issueSingle(req, res) {
 
 async function verifyCertificate(req, res) {
   try {
-    const { certId } = req.params;
+    // First, try to get from database (preferred)
+    const dbCert = await Certificate.findOne({ certId });
+    if (dbCert) {
+      return res.json({
+        exists: true,
+        isValid: dbCert.status === "issued",
+        studentName: dbCert.studentName,
+        studentId: dbCert.studentId,
+        degree: dbCert.degree,
+        institution: dbCert.institution,
+        issueDate: Math.floor(new Date(dbCert.issueDate).getTime() / 1000),
+        ipfsHash: dbCert.ipfs?.ipfsHash || "",
+        issuer: dbCert.studentWallet, // In our schema, studentWallet is used for the institution/issuer address if not specified otherwise
+        status: dbCert.status,
+        verifyUrl: qrService.getVerifyUrl(certId),
+        qrDataUrl: await qrService.generateQRDataURL(certId),
+        fromDatabase: true
+      });
+    }
+
     const result = await blockchainService.verifyCertificate(certId);
 
     if (!result.exists) {
