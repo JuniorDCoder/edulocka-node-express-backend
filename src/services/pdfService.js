@@ -22,7 +22,15 @@ const LOCAL_PUPPETEER_CACHE_DIR =
   process.env.PUPPETEER_CACHE_DIR || path.join(getBackendRoot(), ".cache", "puppeteer");
 process.env.PUPPETEER_CACHE_DIR = LOCAL_PUPPETEER_CACHE_DIR;
 
-const puppeteer = require("puppeteer");
+const puppeteer = isServerlessRuntime() ? require("puppeteer-core") : require("puppeteer");
+let chromium = null;
+if (isServerlessRuntime()) {
+  try {
+    chromium = require("@sparticuz/chromium");
+  } catch (err) {
+    console.warn("[pdfService] @sparticuz/chromium not found in serverless runtime, falling back to standard puppeteer.");
+  }
+}
 
 const TEMPLATES_DIR = getTemplatesDir();
 const INSTITUTION_TEMPLATES_DIR = getInstitutionTemplatesDir();
@@ -179,6 +187,24 @@ function resolveBrowserExecutablePath() {
 }
 
 async function launchBrowser() {
+  // ── SERVERLESS (VERCEL) OPTIMIZATION ──────────────────────────────────────
+  if (isServerlessRuntime() && chromium) {
+    console.log("[pdfService] Launching browser in serverless mode...");
+    try {
+      return await puppeteer.launch({
+        args: chromium.args,
+        defaultViewport: chromium.defaultViewport,
+        executablePath: await chromium.executablePath(),
+        headless: chromium.headless,
+        ignoreHTTPSErrors: true,
+      });
+    } catch (err) {
+      console.error("[pdfService] Serverless browser launch failed:", err.message);
+      // Fall through to standard probe
+    }
+  }
+
+  // ── STANDARD PROBE ────────────────────────────────────────────────────────
   let executablePath = resolveBrowserExecutablePath();
   
   // If no executable found, try to install it once (non-serverless only)

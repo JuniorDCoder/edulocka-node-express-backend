@@ -230,9 +230,20 @@ async function issueCertificate({
 
   // Wait for confirmation with retry
   const receipt = await executeWithRetry(
-    () => withRpcContext("Failed while waiting for issuance transaction confirmation", () =>
-      tx.wait()
-    ),
+    async () => {
+      const r = await withRpcContext("Failed while waiting for issuance transaction confirmation", () =>
+        tx.wait()
+      );
+      
+      // Safety check: blockNumber should never be 0 for a confirmed tx
+      if (!r.blockNumber || r.blockNumber === 0) {
+        console.warn(`⚠️ Transaction ${tx.hash} confirmed but blockNumber is 0. Fetching current block as fallback.`);
+        const provider = getProvider();
+        r.blockNumber = await provider.getBlockNumber();
+      }
+      
+      return r;
+    },
     2,
     1000
   );
@@ -331,6 +342,13 @@ async function issueBatch(certificates, onProgress) {
       nonce++;
 
       const receipt = await tx.wait();
+      
+      // Safety check: blockNumber should never be 0 for a confirmed tx
+      if (!receipt.blockNumber || receipt.blockNumber === 0) {
+        console.warn(`⚠️ Batch transaction ${tx.hash} confirmed but blockNumber is 0. Fetching current block as fallback.`);
+        const provider = getProvider();
+        receipt.blockNumber = await provider.getBlockNumber();
+      }
 
       succeeded++;
       results.push({
