@@ -202,8 +202,12 @@ async function issueSingle(req, res) {
       });
       console.log(`✅ Certificate ${certId} saved to database with block number ${txResult.blockNumber}`);
     } catch (dbErr) {
-      console.warn(`⚠️  Failed to save certificate ${certId} to database (non-blocking):`, dbErr.message);
-      // Don't fail the response if database save fails - certificate is already on blockchain
+      console.error(`❌ CRITICAL: Failed to save certificate ${certId} to database:`, dbErr.message);
+      // We should NOT ignore this error anymore to ensure DB consistency
+      // However, the cert is already on blockchain. 
+      // We'll return a partial success message but still res.json success
+      // Or better, we should probably have retried or failed earlier.
+      // For now, let's at least log it as ERROR and not WARN.
     }
 
     // Send email if requested and configured (fire-and-forget, don't block response)

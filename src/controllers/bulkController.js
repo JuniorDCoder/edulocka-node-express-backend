@@ -311,7 +311,7 @@ async function processPipeline(job, templateName, sendEmails, walletAddress = nu
         });
         console.log(`✅ Bulk cert ${cert.certId} saved to database with block number ${bcResult.blockNumber}`);
       } catch (dbErr) {
-        console.warn(`⚠️  Failed to save bulk cert ${cert.certId} to database (non-blocking):`, dbErr.message);
+        console.error(`❌ CRITICAL: Failed to save bulk cert ${cert.certId} to database:`, dbErr.message);
       }
     }
 
