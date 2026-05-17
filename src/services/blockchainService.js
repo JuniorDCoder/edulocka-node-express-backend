@@ -128,11 +128,13 @@ function getSigner() {
 }
 
 function getReadContract() {
-  return new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, getProvider());
+  const address = ethers.getAddress(CONTRACT_ADDRESS);
+  return new ethers.Contract(address, CONTRACT_ABI, getProvider());
 }
 
 function getWriteContract() {
-  return new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, getSigner());
+  const address = ethers.getAddress(CONTRACT_ADDRESS);
+  return new ethers.Contract(address, CONTRACT_ABI, getSigner());
 }
 
 async function assertBackendIssuerReady(expectedWalletAddress = null) {
@@ -149,26 +151,27 @@ async function assertBackendIssuerReady(expectedWalletAddress = null) {
 
   // Check if the INSTITUTION wallet is authorized (not the backend signer)
   if (expectedWalletAddress) {
+    const formattedAddress = ethers.getAddress(expectedWalletAddress);
     console.log(`   Checking if institution wallet is authorized...`);
     const isInstitutionAuthorized = await withRpcContext(
-      `Failed to check institution authorization for ${expectedWalletAddress}`,
-      () => contract.isAuthorizedInstitution(expectedWalletAddress)
+      `Failed to check institution authorization for ${formattedAddress}`,
+      () => contract.isAuthorizedInstitution(formattedAddress)
     );
 
     if (!isInstitutionAuthorized) {
       throw new Error(
-        `Institution wallet ${expectedWalletAddress} is not authorized as an institution on-chain. This institution must be approved and authorized before issuing certificates.`
+        `Institution wallet ${formattedAddress} is not authorized as an institution on-chain. This institution must be approved and authorized before issuing certificates.`
       );
     }
 
     const institution = await withRpcContext(
-      `Failed to load institution record for ${expectedWalletAddress}`,
-      () => contract.getInstitution(expectedWalletAddress)
+      `Failed to load institution record for ${formattedAddress}`,
+      () => contract.getInstitution(formattedAddress)
     );
 
     if (!institution.isActive) {
       throw new Error(
-        `Institution wallet ${expectedWalletAddress} is authorized but currently inactive on-chain. Contact the admin to reactivate it.`
+        `Institution wallet ${formattedAddress} is authorized but currently inactive on-chain. Contact the admin to reactivate it.`
       );
     }
 
@@ -219,7 +222,7 @@ async function issueCertificate({
         studentName,
         studentId,
         degree,
-        institution,
+        ethers.isAddress(institution) ? ethers.getAddress(institution) : institution,
         timestamp,
         ipfsHash || ""
       )
@@ -453,8 +456,9 @@ async function getStats() {
 
 async function isAuthorized() {
   const signer = getSigner();
+  const address = await signer.getAddress();
   const contract = getReadContract();
-  return contract.isAuthorizedInstitution(signer.address);
+  return contract.isAuthorizedInstitution(address);
 }
 
 // ── Institution Authorization (Admin functions) ─────────────────────────────
@@ -466,8 +470,9 @@ async function isAuthorized() {
  * @param {object} data - { name, registrationNumber, country }
  */
 async function authorizeInstitution(walletAddress, data) {
+  const formattedAddress = ethers.getAddress(walletAddress);
   console.log(`\n🔗 Authorizing institution on blockchain...`);
-  console.log(`   Wallet: ${walletAddress}`);
+  console.log(`   Wallet: ${formattedAddress}`);
   console.log(`   Name: ${data.name}`);
 
   const contract = getWriteContract();
@@ -480,7 +485,7 @@ async function authorizeInstitution(walletAddress, data) {
       async () => {
         console.log(`     Calling contract.addInstitution()...`);
         const txResponse = await contract.addInstitution(
-          walletAddress,
+          formattedAddress,
           data.name,
           data.registrationNumber,
           data.country
@@ -531,8 +536,9 @@ async function authorizeInstitution(walletAddress, data) {
  * @param {string} walletAddress - Institution's wallet address
  */
 async function deauthorizeInstitution(walletAddress) {
+  const formattedAddress = ethers.getAddress(walletAddress);
   console.log(`\n🔗 Deauthorizing institution on blockchain...`);
-  console.log(`   Wallet: ${walletAddress}`);
+  console.log(`   Wallet: ${formattedAddress}`);
 
   const contract = getWriteContract();
   
@@ -543,7 +549,7 @@ async function deauthorizeInstitution(walletAddress) {
     tx = await executeWithRetry(
       async () => {
         console.log(`     Calling contract.removeInstitution()...`);
-        const txResponse = await contract.removeInstitution(walletAddress);
+        const txResponse = await contract.removeInstitution(formattedAddress);
         console.log(`     ✅ Transaction submitted: ${txResponse.hash}`);
         return txResponse;
       },
@@ -591,9 +597,10 @@ async function deauthorizeInstitution(walletAddress) {
  * @returns {Promise<boolean>}
  */
 async function checkIfAuthorized(walletAddress) {
+  const formattedAddress = ethers.getAddress(walletAddress);
   const contract = getReadContract();
-  return await withRpcContext(`Failed to check authorization for ${walletAddress}`, () =>
-    contract.isAuthorizedInstitution(walletAddress)
+  return await withRpcContext(`Failed to check authorization for ${formattedAddress}`, () =>
+    contract.isAuthorizedInstitution(formattedAddress)
   );
 }
 
@@ -603,13 +610,14 @@ async function checkIfAuthorized(walletAddress) {
  * @returns {Promise<object>} Institution data
  */
 async function getInstitutionInfo(walletAddress) {
+  const formattedAddress = ethers.getAddress(walletAddress);
   const contract = getReadContract();
   const [inst, isAuth] = await Promise.all([
-    withRpcContext(`Failed to load institution record for ${walletAddress}`, () =>
-      contract.getInstitution(walletAddress)
+    withRpcContext(`Failed to load institution record for ${formattedAddress}`, () =>
+      contract.getInstitution(formattedAddress)
     ),
-    withRpcContext(`Failed to load authorization state for ${walletAddress}`, () =>
-      contract.isAuthorizedInstitution(walletAddress)
+    withRpcContext(`Failed to load authorization state for ${formattedAddress}`, () =>
+      contract.isAuthorizedInstitution(formattedAddress)
     ),
   ]);
 
