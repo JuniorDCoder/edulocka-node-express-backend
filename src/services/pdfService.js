@@ -22,14 +22,33 @@ const LOCAL_PUPPETEER_CACHE_DIR =
   process.env.PUPPETEER_CACHE_DIR || path.join(getBackendRoot(), ".cache", "puppeteer");
 process.env.PUPPETEER_CACHE_DIR = LOCAL_PUPPETEER_CACHE_DIR;
 
-const puppeteer = isServerlessRuntime() ? require("puppeteer-core") : require("puppeteer");
-let chromium = null;
-if (isServerlessRuntime()) {
-  try {
-    chromium = require("@sparticuz/chromium");
-  } catch (err) {
-    console.warn("[pdfService] @sparticuz/chromium not found in serverless runtime, falling back to standard puppeteer.");
+let puppeteerPromise = null;
+let chromiumPromise = null;
+
+async function loadPuppeteer() {
+  if (!puppeteerPromise) {
+    const packageName = isServerlessRuntime() ? "puppeteer-core" : "puppeteer";
+    puppeteerPromise = import(packageName).then((mod) => mod.default || mod);
   }
+  return puppeteerPromise;
+}
+
+async function loadChromium() {
+  if (!isServerlessRuntime()) return null;
+
+  if (!chromiumPromise) {
+    chromiumPromise = import("@sparticuz/chromium")
+      .then((mod) => mod.default || mod)
+      .catch((err) => {
+        console.warn(
+          "[pdfService] @sparticuz/chromium not found in serverless runtime, falling back to standard puppeteer.",
+          err.message
+        );
+        return null;
+      });
+  }
+
+  return chromiumPromise;
 }
 
 const TEMPLATES_DIR = getTemplatesDir();
@@ -155,7 +174,7 @@ async function renderHTML(templateName, data, walletAddress = null) {
 
 // ── Generate PDF from HTML ──────────────────────────────────────────────────
 
-function resolveBrowserExecutablePath() {
+async function resolveBrowserExecutablePath() {
   for (const envVar of BROWSER_ENV_VARS) {
     const candidate = String(process.env[envVar] || "").trim();
     if (candidate && fs.existsSync(candidate)) {
@@ -164,6 +183,7 @@ function resolveBrowserExecutablePath() {
   }
 
   try {
+    const puppeteer = await loadPuppeteer();
     const bundledPath = puppeteer.executablePath();
     if (bundledPath && fs.existsSync(bundledPath)) {
       return bundledPath;
@@ -187,6 +207,9 @@ function resolveBrowserExecutablePath() {
 }
 
 async function launchBrowser() {
+  const puppeteer = await loadPuppeteer();
+  const chromium = await loadChromium();
+
   // ── SERVERLESS (VERCEL) OPTIMIZATION ──────────────────────────────────────
   if (isServerlessRuntime() && chromium) {
     console.log("[pdfService] Launching browser in serverless mode...");
@@ -205,7 +228,7 @@ async function launchBrowser() {
   }
 
   // ── STANDARD PROBE ────────────────────────────────────────────────────────
-  let executablePath = resolveBrowserExecutablePath();
+  let executablePath = await resolveBrowserExecutablePath();
   
   // If no executable found, try to install it once (non-serverless only)
   if (!executablePath && !isServerlessRuntime()) {
@@ -221,7 +244,7 @@ async function launchBrowser() {
           PUPPETEER_CACHE_DIR: LOCAL_PUPPETEER_CACHE_DIR,
         },
       });
-      executablePath = resolveBrowserExecutablePath();
+      executablePath = await resolveBrowserExecutablePath();
     } catch (installErr) {
       console.error("[puppeteer] Auto-install failed:", installErr.message);
     }
