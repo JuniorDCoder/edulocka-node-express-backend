@@ -4,4 +4,5 @@ uploads/*
 !uploads/.gitkeep
 output/*
 !output/.gitkeep
+templates/institutions/*
 *.log

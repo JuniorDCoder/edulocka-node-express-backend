@@ -12,6 +12,7 @@ const ipfsService = require("../services/ipfsService");
 const pdfService = require("../services/pdfService");
 const qrService = require("../services/qrService");
 const emailService = require("../services/emailService");
+const aiTemplateService = require("../services/aiTemplateService");
 const { validateCertificate } = require("../utils/validator");
 const Certificate = require("../models/Certificate");
 
@@ -19,6 +20,68 @@ const TEMPLATES_DIR = path.join(__dirname, "..", "..", "templates");
 
 function sha256Hex(buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
+}
+
+function sanitizeTemplateId(value) {
+  const baseName = String(value || "ai-certificate-template")
+    .trim()
+    .replace(/[^a-zA-Z0-9-_]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toLowerCase();
+
+  return baseName || "ai-certificate-template";
+}
+
+function getUniqueTemplatePath(dir, requestedName) {
+  let templateId = sanitizeTemplateId(requestedName);
+  let destPath = path.join(dir, `${templateId}.html`);
+  let index = 2;
+
+  while (fs.existsSync(destPath)) {
+    templateId = `${sanitizeTemplateId(requestedName)}-${index}`;
+    destPath = path.join(dir, `${templateId}.html`);
+    index += 1;
+  }
+
+  return { templateId, destPath };
+}
+
+function getOwnedTemplatePath(walletAddress, templateId) {
+  if (!walletAddress) {
+    throw new Error("Wallet authentication required");
+  }
+
+  const safeTemplateId = sanitizeTemplateId(templateId);
+  if (safeTemplateId !== String(templateId || "").toLowerCase()) {
+    throw new Error("Invalid template ID");
+  }
+
+  const institutionDir = pdfService.getInstitutionTemplateDir(walletAddress);
+  return {
+    templateId: safeTemplateId,
+    templatePath: path.join(institutionDir, `${safeTemplateId}.html`),
+  };
+}
+
+async function assertAuthorizedTemplateOwner(walletAddress) {
+  const isAuthorized = await blockchainService.checkIfAuthorized(walletAddress);
+  if (!isAuthorized) {
+    const err = new Error("Only authorized institutions can manage certificate templates.");
+    err.statusCode = 403;
+    throw err;
+  }
+}
+
+function sampleTemplateData(institutionName) {
+  return {
+    certId: "CERT-2026-TPL-001",
+    studentName: "Jane Doe",
+    studentId: "STU-2026-001",
+    degree: "Bachelor of Science in Computer Science",
+    institution: institutionName || "Edulocka University",
+    issueDate: "2026-06-15",
+  };
 }
 
 async function fetchBufferWithTimeout(url, timeoutMs = 15000) {
@@ -516,6 +579,180 @@ async function uploadTemplate(req, res) {
   }
 }
 
+// POST /api/templates/generate-ai  (requires wallet auth + authorized institution)
+async function generateTemplateWithAI(req, res) {
+  try {
+    const walletAddress = req.walletAddress;
+    if (!walletAddress) {
+      return res.status(401).json({ error: "Wallet authentication required to generate templates" });
+    }
+
+    const isAuthorized = await blockchainService.checkIfAuthorized(walletAddress);
+    if (!isAuthorized) {
+      return res.status(403).json({
+        error: "Only authorized institutions can generate certificate templates with AI.",
+      });
+    }
+
+    const {
+      prompt,
+      templateName,
+      institutionName,
+      tone,
+      colorPalette,
+    } = req.body || {};
+
+    if (!prompt || String(prompt).trim().length < 12) {
+      return res.status(400).json({ error: "Describe the certificate template you want in at least 12 characters." });
+    }
+
+    const institutionDir = pdfService.getInstitutionTemplateDir(walletAddress);
+    const { templateId, destPath } = getUniqueTemplatePath(institutionDir, templateName);
+
+    const { html, placeholders } = await aiTemplateService.generateCertificateTemplate({
+      prompt: String(prompt).trim(),
+      institutionName: String(institutionName || "").trim(),
+      tone: String(tone || "").trim(),
+      colorPalette: String(colorPalette || "").trim(),
+    });
+
+    fs.writeFileSync(destPath, html, "utf8");
+
+    const previewHtml = await pdfService.renderHTML(
+      templateId,
+      {
+        certId: "CERT-2026-AI-001",
+        studentName: "Jane Doe",
+        studentId: "STU-2026-001",
+        degree: "Bachelor of Science in Computer Science",
+        institution: institutionName || "Edulocka University",
+        issueDate: "2026-06-15",
+      },
+      walletAddress
+    );
+
+    res.json({
+      success: true,
+      templateId,
+      owner: walletAddress.toLowerCase(),
+      message: `Template "${templateId}" generated and saved to your institution's templates.`,
+      placeholders,
+      previewHtml,
+    });
+  } catch (err) {
+    console.error("AI template generation error:", err);
+    const status = err.statusCode || (err.message?.includes("Gemini is not configured") ? 503 : 500);
+    res.status(status).json({ error: err.message || "Failed to generate template" });
+  }
+}
+
+// PUT /api/templates/:templateId  (requires wallet auth + authorized institution)
+async function saveTemplateHTML(req, res) {
+  try {
+    const walletAddress = req.walletAddress;
+    await assertAuthorizedTemplateOwner(walletAddress);
+
+    const { templateId } = req.params;
+    const { html, institutionName } = req.body || {};
+
+    if (!html || String(html).trim().length < 120) {
+      return res.status(400).json({ error: "Template HTML must be at least 120 characters." });
+    }
+
+    const { templatePath } = getOwnedTemplatePath(walletAddress, templateId);
+    fs.writeFileSync(templatePath, String(html), "utf8");
+
+    const previewHtml = await pdfService.renderHTML(templateId, sampleTemplateData(institutionName), walletAddress);
+
+    res.json({
+      success: true,
+      templateId,
+      owner: walletAddress.toLowerCase(),
+      message: `Template "${templateId}" saved to your institution's library.`,
+      previewHtml,
+    });
+  } catch (err) {
+    console.error("Save template error:", err);
+    res.status(err.statusCode || (err.message === "Invalid template ID" ? 400 : 500)).json({
+      error: err.message || "Failed to save template",
+    });
+  }
+}
+
+// DELETE /api/templates/:templateId  (requires wallet auth + authorized institution)
+async function deleteTemplate(req, res) {
+  try {
+    const walletAddress = req.walletAddress;
+    await assertAuthorizedTemplateOwner(walletAddress);
+
+    const { templateId } = req.params;
+    const { templatePath } = getOwnedTemplatePath(walletAddress, templateId);
+
+    if (!fs.existsSync(templatePath)) {
+      return res.status(404).json({ error: `Template "${templateId}" not found in your institution library.` });
+    }
+
+    fs.unlinkSync(templatePath);
+
+    res.json({
+      success: true,
+      templateId,
+      owner: walletAddress.toLowerCase(),
+      message: `Template "${templateId}" deleted from your institution's library.`,
+    });
+  } catch (err) {
+    console.error("Delete template error:", err);
+    res.status(err.statusCode || (err.message === "Invalid template ID" ? 400 : 500)).json({
+      error: err.message || "Failed to delete template",
+    });
+  }
+}
+
+// POST /api/templates/:templateId/edit-ai  (requires wallet auth + authorized institution)
+async function editTemplateWithAI(req, res) {
+  try {
+    const walletAddress = req.walletAddress;
+    await assertAuthorizedTemplateOwner(walletAddress);
+
+    const { templateId } = req.params;
+    const { prompt, institutionName } = req.body || {};
+
+    if (!prompt || String(prompt).trim().length < 12) {
+      return res.status(400).json({ error: "Describe the edit you want in at least 12 characters." });
+    }
+
+    const { templatePath } = getOwnedTemplatePath(walletAddress, templateId);
+    if (!fs.existsSync(templatePath)) {
+      return res.status(404).json({ error: `Template "${templateId}" not found in your institution library.` });
+    }
+
+    const existingHtml = fs.readFileSync(templatePath, "utf8");
+    const { html, placeholders } = await aiTemplateService.editCertificateTemplate({
+      prompt: String(prompt).trim(),
+      existingHtml,
+    });
+
+    fs.writeFileSync(templatePath, html, "utf8");
+
+    const previewHtml = await pdfService.renderHTML(templateId, sampleTemplateData(institutionName), walletAddress);
+
+    res.json({
+      success: true,
+      templateId,
+      owner: walletAddress.toLowerCase(),
+      message: `Template "${templateId}" updated with AI.`,
+      placeholders,
+      previewHtml,
+    });
+  } catch (err) {
+    console.error("AI template edit error:", err);
+    const status = err.message?.includes("Gemini is not configured")
+      ? 503
+      : err.statusCode || (err.message === "Invalid template ID" ? 400 : 500);
+    res.status(status).json({ error: err.message || "Failed to edit template with AI" });
+  }
+}
+
 // GET /api/templates  (optional wallet auth — unauthenticated gets defaults only)
 async function listTemplates(req, res) {
   try {
@@ -834,6 +1071,10 @@ module.exports = {
   verifyCertificateDocument,
   generatePDF,
   uploadTemplate,
+  generateTemplateWithAI,
+  editTemplateWithAI,
+  saveTemplateHTML,
+  deleteTemplate,
   listTemplates,
   getTemplate,
   previewTemplate,

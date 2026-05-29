@@ -11,7 +11,7 @@ const router = express.Router();
 const bulkController = require("../controllers/bulkController");
 const certificateController = require("../controllers/certificateController");
 const blogController = require("../controllers/blogController");
-const { requireWalletAuth, optionalWalletAuth } = require("../middleware/authMiddleware");
+const { requireWalletAuth, optionalWalletAuth, walletRateLimit } = require("../middleware/authMiddleware");
 const { requireAdminAuth } = require("../middleware/adminMiddleware");
 const { ensureDirSync, getUploadsDir } = require("../utils/runtimePaths");
 
@@ -197,6 +197,32 @@ router.post(
   requireWalletAuth,
   templateUpload.single("template"),
   certificateController.uploadTemplate
+);
+
+router.post(
+  "/templates/generate-ai",
+  requireWalletAuth,
+  walletRateLimit(8, 15 * 60 * 1000),
+  certificateController.generateTemplateWithAI
+);
+
+router.post(
+  "/templates/:templateId/edit-ai",
+  requireWalletAuth,
+  walletRateLimit(8, 15 * 60 * 1000),
+  certificateController.editTemplateWithAI
+);
+
+router.put(
+  "/templates/:templateId",
+  requireWalletAuth,
+  certificateController.saveTemplateHTML
+);
+
+router.delete(
+  "/templates/:templateId",
+  requireWalletAuth,
+  certificateController.deleteTemplate
 );
 
 // List available templates (optional auth — defaults for all, + institution-specific when authenticated)
