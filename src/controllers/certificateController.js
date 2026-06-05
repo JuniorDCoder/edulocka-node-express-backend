@@ -13,10 +13,9 @@ const pdfService = require("../services/pdfService");
 const qrService = require("../services/qrService");
 const emailService = require("../services/emailService");
 const aiTemplateService = require("../services/aiTemplateService");
+const templateStoreService = require("../services/templateStoreService");
 const { validateCertificate } = require("../utils/validator");
 const Certificate = require("../models/Certificate");
-
-const TEMPLATES_DIR = path.join(__dirname, "..", "..", "templates");
 
 function sha256Hex(buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
@@ -45,6 +44,21 @@ function getUniqueTemplatePath(dir, requestedName) {
   }
 
   return { templateId, destPath };
+}
+
+function mergeTemplateLists(fileTemplates, storedTemplates, walletAddress) {
+  const seen = new Set(fileTemplates.map((template) => `${template.owner}:${template.id}`));
+  const wallet = templateStoreService.normalizeWalletAddress(walletAddress);
+  const storedOnly = storedTemplates
+    .filter((template) => !seen.has(`${wallet}:${template.templateId}`))
+    .map((template) => ({
+      id: template.templateId,
+      name: template.name || templateStoreService.displayNameFromTemplateId(template.templateId),
+      path: templateStoreService.getTemplatePath(wallet, template.templateId),
+      owner: wallet,
+    }));
+
+  return [...fileTemplates, ...storedOnly];
 }
 
 function getOwnedTemplatePath(walletAddress, templateId) {
@@ -170,6 +184,7 @@ async function issueSingle(req, res) {
       };
       documentHash = ipfsService.computeContentHash(req.file.buffer);
     } else {
+      await templateStoreService.restoreInstitutionTemplate(walletAddress, templateName);
       // Generate PDF from selected template
       pdfResult = await pdfService.savePDF(
         templateName,
@@ -328,6 +343,7 @@ async function issueSingle(req, res) {
 
 async function verifyCertificate(req, res) {
   try {
+    const { certId } = req.params;
     // First, try to get from database (preferred)
     const dbCert = await Certificate.findOne({ certId });
     if (dbCert) {
@@ -374,22 +390,54 @@ async function verifyCertificate(req, res) {
 // VERIFY UPLOADED CERTIFICATE DOCUMENT
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /api/certificates/verify-file
-// multipart/form-data: { certId, document }
+// multipart/form-data: { certId?, document }
 
 async function verifyCertificateDocument(req, res) {
   try {
-    const certId = String(req.body.certId || "").trim();
-    if (!certId) {
-      return res.status(400).json({ error: "certId is required" });
-    }
     if (!req.file || !req.file.buffer) {
       return res.status(400).json({ error: "document file is required" });
+    }
+
+    const requestedCertId = String(req.body.certId || "").trim();
+    const uploadedBuffer = req.file.buffer;
+    const uploadedSha256 = sha256Hex(uploadedBuffer);
+    let certId = requestedCertId;
+    let matchedDbCert = null;
+    let verificationMode = "certId";
+
+    if (!certId) {
+      matchedDbCert = await Certificate.findOne({ "ipfs.documentHash": uploadedSha256 });
+      if (!matchedDbCert) {
+        return res.status(404).json({
+          exists: false,
+          lookup: "documentHash",
+          uploaded: {
+            fileName: req.file.originalname,
+            mimeType: req.file.mimetype,
+            size: uploadedBuffer.length,
+            sha256: uploadedSha256,
+          },
+          message:
+            "No Edulocka certificate record has an IPFS document hash matching this uploaded PDF.",
+        });
+      }
+
+      certId = matchedDbCert.certId;
+      verificationMode = "documentHash";
     }
 
     const certificate = await blockchainService.verifyCertificate(certId);
     if (!certificate.exists) {
       return res.status(404).json({
         exists: false,
+        certId,
+        lookup: verificationMode,
+        uploaded: {
+          fileName: req.file.originalname,
+          mimeType: req.file.mimetype,
+          size: uploadedBuffer.length,
+          sha256: uploadedSha256,
+        },
         message: `Certificate \"${certId}\" not found on blockchain`,
       });
     }
@@ -398,12 +446,16 @@ async function verifyCertificateDocument(req, res) {
       return res.status(409).json({
         exists: true,
         certId,
+        lookup: verificationMode,
+        uploaded: {
+          fileName: req.file.originalname,
+          mimeType: req.file.mimetype,
+          size: uploadedBuffer.length,
+          sha256: uploadedSha256,
+        },
         error: "Certificate has no on-chain IPFS hash to compare against",
       });
     }
-
-    const uploadedBuffer = req.file.buffer;
-    const uploadedSha256 = sha256Hex(uploadedBuffer);
 
     let ipfsDoc;
     try {
@@ -412,6 +464,7 @@ async function verifyCertificateDocument(req, res) {
       return res.status(502).json({
         exists: true,
         certId,
+        lookup: verificationMode,
         uploaded: {
           fileName: req.file.originalname,
           mimeType: req.file.mimetype,
@@ -435,6 +488,7 @@ async function verifyCertificateDocument(req, res) {
     res.json({
       exists: true,
       certId,
+      lookup: verificationMode,
       certificate: {
         isValid: certificate.isValid,
         studentName: certificate.studentName,
@@ -550,10 +604,7 @@ async function uploadTemplate(req, res) {
     }
 
     // Sanitize the template name
-    const baseName = path
-      .basename(req.file.originalname, ext)
-      .replace(/[^a-zA-Z0-9-_]/g, "-")
-      .toLowerCase();
+    const baseName = sanitizeTemplateId(path.basename(req.file.originalname, ext));
 
     // Save to institution-specific directory
     const institutionDir = pdfService.getInstitutionTemplateDir(walletAddress);
@@ -561,6 +612,13 @@ async function uploadTemplate(req, res) {
 
     // Move uploaded file to institution templates directory
     fs.renameSync(req.file.path, destPath);
+    const html = fs.readFileSync(destPath, "utf8");
+    await templateStoreService.upsertInstitutionTemplate({
+      walletAddress,
+      templateId: baseName,
+      html,
+      source: "upload",
+    });
 
     res.json({
       success: true,
@@ -606,6 +664,7 @@ async function generateTemplateWithAI(req, res) {
       return res.status(400).json({ error: "Describe the certificate template you want in at least 12 characters." });
     }
 
+    await templateStoreService.restoreInstitutionTemplates(walletAddress);
     const institutionDir = pdfService.getInstitutionTemplateDir(walletAddress);
     const { templateId, destPath } = getUniqueTemplatePath(institutionDir, templateName);
 
@@ -617,6 +676,13 @@ async function generateTemplateWithAI(req, res) {
     });
 
     fs.writeFileSync(destPath, html, "utf8");
+    await templateStoreService.upsertInstitutionTemplate({
+      walletAddress,
+      templateId,
+      html,
+      source: "ai",
+      placeholders,
+    });
 
     const previewHtml = await pdfService.renderHTML(
       templateId,
@@ -661,6 +727,12 @@ async function saveTemplateHTML(req, res) {
 
     const { templatePath } = getOwnedTemplatePath(walletAddress, templateId);
     fs.writeFileSync(templatePath, String(html), "utf8");
+    await templateStoreService.upsertInstitutionTemplate({
+      walletAddress,
+      templateId,
+      html: String(html),
+      source: "builder",
+    });
 
     const previewHtml = await pdfService.renderHTML(templateId, sampleTemplateData(institutionName), walletAddress);
 
@@ -687,12 +759,14 @@ async function deleteTemplate(req, res) {
 
     const { templateId } = req.params;
     const { templatePath } = getOwnedTemplatePath(walletAddress, templateId);
+    await templateStoreService.restoreInstitutionTemplate(walletAddress, templateId);
 
     if (!fs.existsSync(templatePath)) {
       return res.status(404).json({ error: `Template "${templateId}" not found in your institution library.` });
     }
 
     fs.unlinkSync(templatePath);
+    await templateStoreService.markInstitutionTemplateDeleted(walletAddress, templateId);
 
     res.json({
       success: true,
@@ -722,6 +796,7 @@ async function editTemplateWithAI(req, res) {
     }
 
     const { templatePath } = getOwnedTemplatePath(walletAddress, templateId);
+    await templateStoreService.restoreInstitutionTemplate(walletAddress, templateId);
     if (!fs.existsSync(templatePath)) {
       return res.status(404).json({ error: `Template "${templateId}" not found in your institution library.` });
     }
@@ -733,6 +808,13 @@ async function editTemplateWithAI(req, res) {
     });
 
     fs.writeFileSync(templatePath, html, "utf8");
+    await templateStoreService.upsertInstitutionTemplate({
+      walletAddress,
+      templateId,
+      html,
+      source: "ai_edit",
+      placeholders,
+    });
 
     const previewHtml = await pdfService.renderHTML(templateId, sampleTemplateData(institutionName), walletAddress);
 
@@ -757,7 +839,14 @@ async function editTemplateWithAI(req, res) {
 async function listTemplates(req, res) {
   try {
     const walletAddress = req.walletAddress || null;
-    const templates = pdfService.listTemplates(walletAddress);
+    const storedTemplates = walletAddress
+      ? await templateStoreService.restoreInstitutionTemplates(walletAddress)
+      : [];
+    const templates = mergeTemplateLists(
+      pdfService.listTemplates(walletAddress),
+      storedTemplates,
+      walletAddress
+    );
     res.json({ templates });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -770,6 +859,9 @@ async function previewTemplate(req, res) {
   try {
     const { templateName = "default-certificate", sampleData } = req.body;
     const walletAddress = req.walletAddress || null;
+    if (walletAddress) {
+      await templateStoreService.restoreInstitutionTemplate(walletAddress, templateName);
+    }
 
     const data = sampleData || {
       certId: "CERT-2026-001-ABC",
@@ -800,6 +892,9 @@ async function getTemplate(req, res) {
     }
 
     // Load template HTML from pdfService (handles both default and institution templates)
+    if (walletAddress) {
+      await templateStoreService.restoreInstitutionTemplate(walletAddress, templateId);
+    }
     const html = await pdfService.loadTemplateHTML(templateId, walletAddress);
 
     if (!html) {

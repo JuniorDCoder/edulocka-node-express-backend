@@ -20,7 +20,7 @@ const certificateSchema = new mongoose.Schema({
   
   // IPFS data
   ipfs: {
-    documentHash: { type: String, default: null },
+    documentHash: { type: String, default: null, index: true },
     ipfsHash: { type: String, default: null },
     pinned: { type: Boolean, default: false },
     gateway: { type: String, default: null },

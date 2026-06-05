@@ -15,6 +15,7 @@ const ipfsService = require("../services/ipfsService");
 const pdfService = require("../services/pdfService");
 const qrService = require("../services/qrService");
 const emailService = require("../services/emailService");
+const templateStoreService = require("../services/templateStoreService");
 const Certificate = require("../models/Certificate");
 const { isServerlessRuntime } = require("../utils/runtimePaths");
 
@@ -112,6 +113,7 @@ async function processBatch(req, res) {
     }
 
     await blockchainService.assertBackendIssuerReady(walletAddress);
+    await templateStoreService.restoreInstitutionTemplate(walletAddress, templateName);
     pdfService.loadTemplate(templateName, walletAddress);
 
     // Mark as processing
