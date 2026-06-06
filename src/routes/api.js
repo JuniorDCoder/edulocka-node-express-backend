@@ -253,6 +253,9 @@ router.post("/templates/preview", optionalWalletAuth, certificateController.prev
 // SINGLE CERTIFICATE ENDPOINTS
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Bulk revoke certificates (must come before /:certId routes to avoid route conflicts)
+router.post("/certificates/bulk-revoke", requireWalletAuth, certificateController.bulkRevoke);
+
 // Issue a single certificate (with PDF + QR + optional email)
 /**
  * @openapi
@@ -314,6 +317,9 @@ router.post(
   certificateVerifyUpload.single("document"),
   certificateController.verifyCertificateDocument
 );
+
+// Revoke a single certificate
+router.post("/certificates/:certId/revoke", requireWalletAuth, certificateController.revokeSingle);
 
 // Generate PDF for an existing certificate
 router.get("/certificates/:certId/pdf", certificateController.generatePDF);

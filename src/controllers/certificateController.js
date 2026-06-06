@@ -1146,6 +1146,106 @@ async function listCertificates(req, res) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// REVOKE CERTIFICATE
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/certificates/:certId/revoke
+
+async function revokeSingle(req, res) {
+  try {
+    const { certId } = req.params;
+    const walletAddress = req.walletAddress;
+
+    const isAuthorized = await blockchainService.checkIfAuthorized(walletAddress);
+    if (!isAuthorized) {
+      return res.status(403).json({ error: "Only authorized institutions can revoke certificates" });
+    }
+
+    const cert = await Certificate.findOne({ certId });
+    if (!cert) {
+      return res.status(404).json({ error: "Certificate not found" });
+    }
+
+    if (cert.status === "revoked") {
+      return res.status(409).json({ error: "Certificate is already revoked" });
+    }
+
+    const result = await blockchainService.revokeCertificate(certId);
+
+    await Certificate.updateOne(
+      { certId },
+      { status: "revoked", revokedAt: new Date(), revokedBy: walletAddress }
+    );
+
+    res.json({
+      success: true,
+      certId,
+      txHash: result.txHash,
+      blockNumber: result.blockNumber,
+      message: "Certificate revoked successfully",
+    });
+  } catch (err) {
+    console.error("Revoke single error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BULK REVOKE CERTIFICATES
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/certificates/bulk-revoke
+
+async function bulkRevoke(req, res) {
+  try {
+    const { certIds } = req.body;
+    const walletAddress = req.walletAddress;
+
+    if (!certIds || !Array.isArray(certIds) || certIds.length === 0) {
+      return res.status(400).json({ error: "certIds array is required" });
+    }
+
+    if (certIds.length > 50) {
+      return res.status(400).json({ error: "Maximum 50 certificates per bulk revoke" });
+    }
+
+    const isAuthorized = await blockchainService.checkIfAuthorized(walletAddress);
+    if (!isAuthorized) {
+      return res.status(403).json({ error: "Only authorized institutions can revoke certificates" });
+    }
+
+    const results = [];
+    for (const certId of certIds) {
+      try {
+        const cert = await Certificate.findOne({ certId });
+        if (!cert) {
+          results.push({ certId, success: false, error: "Not found" });
+          continue;
+        }
+        if (cert.status === "revoked") {
+          results.push({ certId, success: false, error: "Already revoked" });
+          continue;
+        }
+        const txResult = await blockchainService.revokeCertificate(certId);
+        await Certificate.updateOne(
+          { certId },
+          { status: "revoked", revokedAt: new Date(), revokedBy: walletAddress }
+        );
+        results.push({ certId, success: true, txHash: txResult.txHash });
+      } catch (err) {
+        results.push({ certId, success: false, error: err.message });
+      }
+    }
+
+    const succeeded = results.filter((r) => r.success).length;
+    const failed = results.filter((r) => !r.success).length;
+
+    res.json({ success: true, total: certIds.length, succeeded, failed, results });
+  } catch (err) {
+    console.error("Bulk revoke error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
 async function listRecentCertificates(req, res) {
   try {
     const limit = Math.min(Number(req.query.limit) || 10, 50);
@@ -1180,4 +1280,6 @@ module.exports = {
   getCertificateData,
   listCertificates,
   listRecentCertificates,
+  revokeSingle,
+  bulkRevoke,
 };

@@ -412,6 +412,21 @@ async function issueBatch(certificates, onProgress) {
 
 // ── Verification ────────────────────────────────────────────────────────────
 
+async function revokeCertificate(certId) {
+  const contract = getWriteContract();
+  const tx = await withRpcContext("Failed to submit revocation transaction", () =>
+    contract.revokeCertificate(certId)
+  );
+  const receipt = await withRpcContext("Failed while waiting for revocation confirmation", () =>
+    tx.wait()
+  );
+  return {
+    txHash: tx.hash,
+    blockNumber: receipt.blockNumber,
+    gasUsed: Number(receipt.gasUsed),
+  };
+}
+
 async function verifyCertificate(certId) {
   const contract = getReadContract();
 
@@ -680,6 +695,7 @@ module.exports = {
   assertBackendIssuerReady,
   generateCertificateId,
   issueCertificate,
+  revokeCertificate,
   issueBatch,
   verifyCertificate,
   getStats,
