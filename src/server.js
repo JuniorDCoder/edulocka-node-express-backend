@@ -42,6 +42,7 @@ const {
 const apiRoutes = require("./routes/api");
 const institutionRoutes = require("./routes/institution");
 const adminRoutes = require("./routes/admin");
+const studentRoutes = require("./routes/student");
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -127,6 +128,7 @@ app.use(
 app.use("/api", apiRoutes);
 app.use("/api/institution", institutionRoutes);
 app.use("/api/admin", adminRoutes);
+app.use("/api/student", studentRoutes);
 
 // ── API Docs ────────────────────────────────────────────────────────────────
 if (swaggerUi && buildOpenApiSpec) {
