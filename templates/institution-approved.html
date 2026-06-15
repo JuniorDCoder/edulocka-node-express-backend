@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Institution Authorized — Edulocka</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f5f7;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);padding:36px 40px;text-align:center;">
+              <h1 style="color:#ffffff;font-size:24px;font-weight:700;margin:0 0 8px;letter-spacing:1px;">🎓 Edulocka</h1>
+              <p style="color:#c5a55a;font-size:13px;margin:0;letter-spacing:2px;text-transform:uppercase;">Blockchain Certificate Verification</p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:36px 40px;">
+              <p style="display:inline-block;background:#dcfce7;color:#166534;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:6px 14px;border-radius:999px;margin:0 0 20px;">
+                ✅ Application Approved
+              </p>
+
+              <p style="font-size:16px;color:#333;margin:0 0 20px;">
+                Dear <strong style="color:#1a1a2e;">{{institutionName}}</strong> Team,
+              </p>
+
+              <p style="font-size:15px;color:#555;line-height:1.7;margin:0 0 24px;">
+                Congratulations! After reviewing your application and supporting documents, we have
+                <strong>authorized {{institutionName}}</strong> on the Edulocka platform. Your institution's
+                wallet is now registered on the blockchain as a verified certificate issuer.
+              </p>
+
+              <!-- Authorization Details Card -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f8f9fb;border-radius:8px;border:1px solid #e8eaed;margin:0 0 24px;">
+                <tr>
+                  <td style="padding:24px;">
+                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                      <tr>
+                        <td style="padding:6px 0;">
+                          <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;">Institution</span><br/>
+                          <span style="font-size:14px;color:#1a1a2e;font-weight:600;">{{institutionName}}</span>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td style="padding:6px 0;">
+                          <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;">Authorized Wallet Address</span><br/>
+                          <span style="font-size:13px;color:#1a1a2e;font-family:'Courier New',monospace;font-weight:600;word-break:break-all;">{{walletAddress}}</span>
+                        </td>
+                      </tr>
+                      {{#if txHash}}
+                      <tr>
+                        <td style="padding:6px 0;">
+                          <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;">Blockchain Transaction</span><br/>
+                          <a href="{{txUrl}}" style="font-size:13px;color:#2563eb;font-family:'Courier New',monospace;word-break:break-all;">{{txHash}}</a>
+                        </td>
+                      </tr>
+                      {{/if}}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <h2 style="font-size:17px;color:#1a1a2e;margin:0 0 16px;">Next Steps — Start Issuing Certificates</h2>
+
+              <!-- Step 1 -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 16px;">
+                <tr>
+                  <td style="vertical-align:top;width:32px;">
+                    <div style="width:24px;height:24px;border-radius:50%;background:#1a1a2e;color:#fff;font-size:13px;font-weight:700;text-align:center;line-height:24px;">1</div>
+                  </td>
+                  <td style="padding-left:12px;">
+                    <p style="font-size:14px;color:#1a1a2e;font-weight:600;margin:0 0 4px;">Connect your institution wallet</p>
+                    <p style="font-size:13px;color:#666;line-height:1.6;margin:0;">
+                      Open the Edulocka portal and connect the same MetaMask wallet that was authorized
+                      (<span style="font-family:'Courier New',monospace;">{{walletAddress}}</span>). Make sure
+                      MetaMask is switched to the <strong>Sepolia Test Network</strong> — this pilot currently
+                      runs on Sepolia testnet.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Step 2 -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 16px;">
+                <tr>
+                  <td style="vertical-align:top;width:32px;">
+                    <div style="width:24px;height:24px;border-radius:50%;background:#1a1a2e;color:#fff;font-size:13px;font-weight:700;text-align:center;line-height:24px;">2</div>
+                  </td>
+                  <td style="padding-left:12px;">
+                    <p style="font-size:14px;color:#1a1a2e;font-weight:600;margin:0 0 4px;">Create your certificate template</p>
+                    <p style="font-size:13px;color:#666;line-height:1.6;margin:0 0 10px;">
+                      Go to the <strong>Templates</strong> page. You can describe your certificate to our
+                      AI Template Generator and it will design it for you, upload your own HTML certificate
+                      design, or build one visually with the drag-and-drop editor.
+                    </p>
+                    <a href="{{templatesUrl}}" style="display:inline-block;background:#1a1a2e;color:#ffffff;font-size:13px;font-weight:600;text-decoration:none;padding:10px 22px;border-radius:6px;">
+                      Open Templates →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Step 3 -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 16px;">
+                <tr>
+                  <td style="vertical-align:top;width:32px;">
+                    <div style="width:24px;height:24px;border-radius:50%;background:#1a1a2e;color:#fff;font-size:13px;font-weight:700;text-align:center;line-height:24px;">3</div>
+                  </td>
+                  <td style="padding-left:12px;">
+                    <p style="font-size:14px;color:#1a1a2e;font-weight:600;margin:0 0 4px;">Issue your first certificate</p>
+                    <p style="font-size:13px;color:#666;line-height:1.6;margin:0 0 10px;">
+                      Go to the <strong>Issue Certificate</strong> page, fill in the student's name, ID, and
+                      programme details, choose your saved template, and click "Issue". The certificate is
+                      written to the blockchain and a PDF with a QR verification code is generated automatically.
+                    </p>
+                    <a href="{{issueUrl}}" style="display:inline-block;background:#1a1a2e;color:#ffffff;font-size:13px;font-weight:600;text-decoration:none;padding:10px 22px;border-radius:6px;">
+                      Open Issue Certificate →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Step 4 -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;">
+                <tr>
+                  <td style="vertical-align:top;width:32px;">
+                    <div style="width:24px;height:24px;border-radius:50%;background:#1a1a2e;color:#fff;font-size:13px;font-weight:700;text-align:center;line-height:24px;">4</div>
+                  </td>
+                  <td style="padding-left:12px;">
+                    <p style="font-size:14px;color:#1a1a2e;font-weight:600;margin:0 0 4px;">Share with your students</p>
+                    <p style="font-size:13px;color:#666;line-height:1.6;margin:0;">
+                      Every certificate comes with a unique verification link and QR code. Students and
+                      employers can confirm authenticity instantly on the public Verify page — no account needed.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Dashboard CTA -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;">
+                <tr>
+                  <td align="center">
+                    <a href="{{dashboardUrl}}" style="display:inline-block;background:#c5a55a;color:#1a1a2e;font-size:14px;font-weight:700;text-decoration:none;padding:14px 36px;border-radius:6px;letter-spacing:0.5px;">
+                      Go to My Institution Dashboard →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="font-size:13px;color:#888;line-height:1.6;margin:0;">
+                Need help getting started? Just reply to this email and our team will walk you through it —
+                we're here to support your institution through the pilot.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f8f9fb;padding:24px 40px;border-top:1px solid #e8eaed;">
+              <p style="font-size:12px;color:#999;text-align:center;margin:0 0 8px;">
+                This is an automated email from Edulocka — Blockchain Certificate Verification System
+              </p>
+              <p style="font-size:11px;color:#bbb;text-align:center;margin:0;">
+                © {{currentYear}} Edulocka. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

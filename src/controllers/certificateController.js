@@ -655,7 +655,7 @@ async function uploadTemplate(req, res) {
     });
   } catch (err) {
     console.error("Upload template error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(err.statusCode || 500).json({ error: err.message });
   }
 }
 
@@ -706,18 +706,28 @@ async function generateTemplateWithAI(req, res) {
       placeholders,
     });
 
-    const previewHtml = await pdfService.renderHTML(
-      templateId,
-      {
-        certId: "CERT-2026-AI-001",
-        studentName: "Jane Doe",
-        studentId: "STU-2026-001",
-        degree: "Bachelor of Science in Computer Science",
-        institution: institutionName || "Edulocka University",
-        issueDate: "2026-06-15",
-      },
-      walletAddress
-    );
+    // The template is already saved at this point — a failed preview render
+    // (e.g. cold-start Chromium issues on serverless) must not turn an
+    // otherwise-successful save into an error response.
+    let previewHtml = null;
+    let previewWarning;
+    try {
+      previewHtml = await pdfService.renderHTML(
+        templateId,
+        {
+          certId: "CERT-2026-AI-001",
+          studentName: "Jane Doe",
+          studentId: "STU-2026-001",
+          degree: "Bachelor of Science in Computer Science",
+          institution: institutionName || "Edulocka University",
+          issueDate: "2026-06-15",
+        },
+        walletAddress
+      );
+    } catch (previewErr) {
+      console.error("AI template preview render error:", previewErr);
+      previewWarning = "Template saved, but the live preview could not be rendered right now.";
+    }
 
     res.json({
       success: true,
@@ -726,6 +736,7 @@ async function generateTemplateWithAI(req, res) {
       message: `Template "${templateId}" generated and saved to your institution's templates.`,
       placeholders,
       previewHtml,
+      ...(previewWarning && { previewWarning }),
     });
   } catch (err) {
     console.error("AI template generation error:", err);
@@ -756,7 +767,16 @@ async function saveTemplateHTML(req, res) {
       source: "builder",
     });
 
-    const previewHtml = await pdfService.renderHTML(templateId, sampleTemplateData(institutionName), walletAddress);
+    // The template is already saved at this point — a failed preview render
+    // must not turn an otherwise-successful save into an error response.
+    let previewHtml = null;
+    let previewWarning;
+    try {
+      previewHtml = await pdfService.renderHTML(templateId, sampleTemplateData(institutionName), walletAddress);
+    } catch (previewErr) {
+      console.error("Template preview render error:", previewErr);
+      previewWarning = "Template saved, but the live preview could not be rendered right now.";
+    }
 
     res.json({
       success: true,
@@ -764,6 +784,7 @@ async function saveTemplateHTML(req, res) {
       owner: walletAddress.toLowerCase(),
       message: `Template "${templateId}" saved to your institution's library.`,
       previewHtml,
+      ...(previewWarning && { previewWarning }),
     });
   } catch (err) {
     console.error("Save template error:", err);
@@ -838,7 +859,16 @@ async function editTemplateWithAI(req, res) {
       placeholders,
     });
 
-    const previewHtml = await pdfService.renderHTML(templateId, sampleTemplateData(institutionName), walletAddress);
+    // The template is already saved at this point — a failed preview render
+    // must not turn an otherwise-successful save into an error response.
+    let previewHtml = null;
+    let previewWarning;
+    try {
+      previewHtml = await pdfService.renderHTML(templateId, sampleTemplateData(institutionName), walletAddress);
+    } catch (previewErr) {
+      console.error("AI template edit preview render error:", previewErr);
+      previewWarning = "Template saved, but the live preview could not be rendered right now.";
+    }
 
     res.json({
       success: true,
@@ -847,6 +877,7 @@ async function editTemplateWithAI(req, res) {
       message: `Template "${templateId}" updated with AI.`,
       placeholders,
       previewHtml,
+      ...(previewWarning && { previewWarning }),
     });
   } catch (err) {
     console.error("AI template edit error:", err);

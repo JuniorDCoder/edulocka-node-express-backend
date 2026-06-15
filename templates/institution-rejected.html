@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Application Update — Edulocka</title>
+</head>
+<body style="margin:0;padding:0;background:#f4f5f7;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
+  <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f5f7;padding:32px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" cellpadding="0" cellspacing="0" width="600" style="max-width:600px;background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%);padding:36px 40px;text-align:center;">
+              <h1 style="color:#ffffff;font-size:24px;font-weight:700;margin:0 0 8px;letter-spacing:1px;">🎓 Edulocka</h1>
+              <p style="color:#c5a55a;font-size:13px;margin:0;letter-spacing:2px;text-transform:uppercase;">Blockchain Certificate Verification</p>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:36px 40px;">
+              <p style="display:inline-block;background:#fee2e2;color:#991b1b;font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;padding:6px 14px;border-radius:999px;margin:0 0 20px;">
+                ❌ Application Not Approved
+              </p>
+
+              <p style="font-size:16px;color:#333;margin:0 0 20px;">
+                Dear <strong style="color:#1a1a2e;">{{institutionName}}</strong> Team,
+              </p>
+
+              <p style="font-size:15px;color:#555;line-height:1.7;margin:0 0 24px;">
+                Thank you for applying to issue blockchain-verified certificates through Edulocka. After
+                reviewing your application and supporting documents, we are unable to approve
+                <strong>{{institutionName}}</strong> for authorization at this time.
+              </p>
+
+              {{#if reason}}
+              <!-- Reason Card -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#fef2f2;border-radius:8px;border:1px solid #fecaca;margin:0 0 24px;">
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <span style="font-size:11px;color:#991b1b;text-transform:uppercase;letter-spacing:1px;font-weight:700;">Reason Provided By Our Review Team</span>
+                    <p style="font-size:14px;color:#7f1d1d;line-height:1.6;margin:8px 0 0;">{{reason}}</p>
+                  </td>
+                </tr>
+              </table>
+              {{/if}}
+
+              <h2 style="font-size:17px;color:#1a1a2e;margin:0 0 16px;">What You Can Do Next</h2>
+
+              <!-- Step 1 -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 16px;">
+                <tr>
+                  <td style="vertical-align:top;width:32px;">
+                    <div style="width:24px;height:24px;border-radius:50%;background:#1a1a2e;color:#fff;font-size:13px;font-weight:700;text-align:center;line-height:24px;">1</div>
+                  </td>
+                  <td style="padding-left:12px;">
+                    <p style="font-size:14px;color:#1a1a2e;font-weight:600;margin:0 0 4px;">Review the feedback above</p>
+                    <p style="font-size:13px;color:#666;line-height:1.6;margin:0;">
+                      The reason given by our review team explains what needs to be corrected or
+                      added — for example, missing registration documents, an unverifiable
+                      registration number, or incomplete contact details.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Step 2 -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 16px;">
+                <tr>
+                  <td style="vertical-align:top;width:32px;">
+                    <div style="width:24px;height:24px;border-radius:50%;background:#1a1a2e;color:#fff;font-size:13px;font-weight:700;text-align:center;line-height:24px;">2</div>
+                  </td>
+                  <td style="padding-left:12px;">
+                    <p style="font-size:14px;color:#1a1a2e;font-weight:600;margin:0 0 4px;">Update your details and documents</p>
+                    <p style="font-size:13px;color:#666;line-height:1.6;margin:0;">
+                      Gather the corrected information — accreditation certificates, official
+                      registration numbers, and a valid institutional contact email and address —
+                      ready to submit again.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Step 3 -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;">
+                <tr>
+                  <td style="vertical-align:top;width:32px;">
+                    <div style="width:24px;height:24px;border-radius:50%;background:#1a1a2e;color:#fff;font-size:13px;font-weight:700;text-align:center;line-height:24px;">3</div>
+                  </td>
+                  <td style="padding-left:12px;">
+                    <p style="font-size:14px;color:#1a1a2e;font-weight:600;margin:0 0 4px;">Submit a new application</p>
+                    <p style="font-size:13px;color:#666;line-height:1.6;margin:0 0 10px;">
+                      You're welcome to reapply at any time once the issues above are addressed.
+                      Our team will review the updated application as soon as it is received.
+                    </p>
+                    <a href="{{applyUrl}}" style="display:inline-block;background:#1a1a2e;color:#ffffff;font-size:13px;font-weight:600;text-decoration:none;padding:10px 22px;border-radius:6px;">
+                      Reapply Now →
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="font-size:13px;color:#888;line-height:1.6;margin:0;">
+                If anything above is unclear, or you believe this decision was made in error, simply
+                reply to this email — our team is happy to clarify what's needed and help you through
+                the process.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#f8f9fb;padding:24px 40px;border-top:1px solid #e8eaed;">
+              <p style="font-size:12px;color:#999;text-align:center;margin:0 0 8px;">
+                This is an automated email from Edulocka — Blockchain Certificate Verification System
+              </p>
+              <p style="font-size:11px;color:#bbb;text-align:center;margin:0;">
+                © {{currentYear}} Edulocka. All rights reserved.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

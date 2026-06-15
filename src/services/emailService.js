@@ -32,9 +32,17 @@ function getFromAddress() {
   return process.env.EMAIL_FROM || address;
 }
 
+function getFrontendBaseUrl() {
+  return (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, "");
+}
+
 function getPortalUrl() {
-  const base = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, "");
-  return `${base}/student/login`;
+  return `${getFrontendBaseUrl()}/student/login`;
+}
+
+function getExplorerTxUrl(txHash) {
+  const base = (process.env.EXPLORER_BASE_URL || "https://sepolia.etherscan.io").replace(/\/+$/, "");
+  return `${base}/tx/${txHash}`;
 }
 
 function createTransporter() {
@@ -311,14 +319,20 @@ function loadInstitutionTemplate(templateName) {
 
 /**
  * Send an institution notification email.
- * @param {string} to - Recipient email
- * @param {"received"|"approved"|"rejected"} type - Notification type
- * @param {object} data - { institutionName, walletAddress, reason?, txHash? }
+ * Never throws — callers should treat this as fire-and-forget.
+ * @param {object} options
+ * @param {string} options.to - Recipient email
+ * @param {"received"|"approved"|"rejected"} options.type - Notification type
+ * @param {object} options.data - { institutionName, walletAddress, reason?, txHash? }
  */
-async function sendInstitutionEmail(to, type, data) {
+async function sendInstitutionEmail({ to, type, data = {} }) {
   const transporter = createTransporter();
   if (!transporter) {
     return { sent: false, error: "Email not configured" };
+  }
+
+  if (!to) {
+    return { sent: false, error: "No recipient email on file" };
   }
 
   const subjects = {
@@ -330,7 +344,7 @@ async function sendInstitutionEmail(to, type, data) {
   const templateFile = `institution-${type}.html`;
   let templateSource = loadInstitutionTemplate(templateFile);
 
-  // Fallback inline templates
+  // Fallback inline templates (used only if the HTML files under backend/templates are missing)
   if (!templateSource) {
     const templates = {
       received: `
@@ -348,8 +362,13 @@ async function sendInstitutionEmail(to, type, data) {
           <p>Dear <strong>{{institutionName}}</strong>,</p>
           <p>Congratulations! Your institution has been authorized on the EduLocka blockchain.</p>
           <p><strong>Wallet Address:</strong> <code>{{walletAddress}}</code></p>
-          {{#if txHash}}<p><strong>Blockchain TX:</strong> <code>{{txHash}}</code></p>{{/if}}
-          <p>You can now issue certificates through the EduLocka platform.</p>
+          {{#if txHash}}<p><strong>Blockchain TX:</strong> <a href="{{txUrl}}">{{txHash}}</a></p>{{/if}}
+          <p><strong>Next steps to start issuing certificates:</strong></p>
+          <ol>
+            <li>Connect this wallet to the Edulocka portal (Sepolia Test Network): <a href="{{dashboardUrl}}">{{dashboardUrl}}</a></li>
+            <li>Create or generate a certificate template: <a href="{{templatesUrl}}">{{templatesUrl}}</a></li>
+            <li>Issue your first certificate: <a href="{{issueUrl}}">{{issueUrl}}</a></li>
+          </ol>
           <p>Best regards,<br/>EduLocka Admin Team</p>
         </div>`,
       rejected: `
@@ -358,7 +377,7 @@ async function sendInstitutionEmail(to, type, data) {
           <p>Dear <strong>{{institutionName}}</strong>,</p>
           <p>After careful review, we were unable to approve your institution's application at this time.</p>
           {{#if reason}}<p><strong>Reason:</strong> {{reason}}</p>{{/if}}
-          <p>You may address the concerns and reapply.</p>
+          <p>You may address the concerns above and reapply at: <a href="{{applyUrl}}">{{applyUrl}}</a></p>
           <p>Best regards,<br/>EduLocka Admin Team</p>
         </div>`,
     };
@@ -366,8 +385,14 @@ async function sendInstitutionEmail(to, type, data) {
   }
 
   const template = Handlebars.compile(templateSource);
+  const base = getFrontendBaseUrl();
   const html = template({
     ...data,
+    dashboardUrl: `${base}/dashboard`,
+    templatesUrl: `${base}/templates`,
+    issueUrl: `${base}/issue`,
+    applyUrl: `${base}/apply-institution`,
+    txUrl: data.txHash ? getExplorerTxUrl(data.txHash) : null,
     currentYear: new Date().getFullYear(),
   });
 

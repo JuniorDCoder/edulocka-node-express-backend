@@ -40,8 +40,23 @@ function getTemplatePath(walletAddress, templateId) {
   return path.join(getInstitutionDir(walletAddress), `${templateId}.html`);
 }
 
+// Mongo is the source of truth for institution templates — on serverless,
+// the on-disk copy under EDULOCKA_STORAGE_ROOT (/tmp) does not survive
+// between invocations, so a failed/skipped DB write here silently loses the
+// template the moment the next request lands on a fresh instance. Give the
+// connection a generous window (matches ensureDbConnected's middleware
+// timeout) so a slow reconnect — e.g. after a long Gemini call drops the
+// socket — doesn't masquerade as success.
 async function canUseDatabase() {
-  return ensureMongoConnected(2500);
+  return ensureMongoConnected(8000);
+}
+
+class TemplatePersistenceError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "TemplatePersistenceError";
+    this.statusCode = 503;
+  }
 }
 
 async function upsertInstitutionTemplate({
@@ -55,8 +70,9 @@ async function upsertInstitutionTemplate({
   const wallet = normalizeWalletAddress(walletAddress);
   if (!wallet || !templateId || !html) return null;
   if (!(await canUseDatabase())) {
-    console.warn(`[templateStore] MongoDB unavailable; template "${templateId}" saved only to runtime storage.`);
-    return null;
+    throw new TemplatePersistenceError(
+      `Could not save template "${templateId}" — the database is temporarily unavailable. Please try again in a few seconds.`
+    );
   }
 
   return CertificateTemplate.findOneAndUpdate(
@@ -144,8 +160,9 @@ async function markInstitutionTemplateDeleted(walletAddress, templateId) {
   if (!wallet || !templateId) return null;
 
   if (!(await canUseDatabase())) {
-    console.warn(`[templateStore] MongoDB unavailable; template "${templateId}" deleted only from runtime storage.`);
-    return null;
+    throw new TemplatePersistenceError(
+      `Could not delete template "${templateId}" — the database is temporarily unavailable. Please try again in a few seconds.`
+    );
   }
 
   return CertificateTemplate.findOneAndUpdate(
@@ -165,4 +182,5 @@ module.exports = {
   restoreInstitutionTemplates,
   getInstitutionTemplateHtml,
   upsertInstitutionTemplate,
+  TemplatePersistenceError,
 };
