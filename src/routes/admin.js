@@ -80,6 +80,25 @@ router.post("/sync-to-blockchain", adminController.syncApprovedInstitutionsToBlo
  */
 router.get("/stats", adminController.getStats);
 
+// ── Certificate Management (platform-wide) ──────────────────────────────────
+
+// List all certificates (filters: ?status=issued&institution=&search=&page=1)
+router.get("/certificates", adminController.listCertificates);
+
+// Get full certificate record
+router.get("/certificates/:certId", adminController.getCertificateDetails);
+
+// Admin-level revoke (works regardless of issuing institution)
+router.post("/certificates/:certId/revoke", adminController.revokeCertificate);
+
+// ── Student Management (platform-wide) ──────────────────────────────────────
+
+// List unique students aggregated across all certificates (?search=&page=1)
+router.get("/students", adminController.listStudents);
+
+// Full certificate history for a single student
+router.get("/students/:studentId", adminController.getStudentDetails);
+
 // ── Blog Management ─────────────────────────────────────────────────────────
 /**
  * @openapi

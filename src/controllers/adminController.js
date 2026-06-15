@@ -6,9 +6,32 @@
 const path = require("path");
 const fs = require("fs");
 const InstitutionApplication = require("../models/InstitutionApplication");
+const Certificate = require("../models/Certificate");
 const blockchainService = require("../services/blockchainService");
 const { generateVerificationReport } = require("../services/verificationService");
 const emailService = require("../services/emailService");
+const { isServerlessRuntime } = require("../utils/runtimePaths");
+
+// Escape special regex chars in user-provided search strings.
+function escapeRegex(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// Mirrors certificateController's deliverEmail: await on serverless (function
+// may freeze right after res.json()), fire-and-forget on long-lived servers.
+async function deliverEmail(promise, label) {
+  if (isServerlessRuntime()) {
+    try {
+      await promise;
+    } catch (err) {
+      console.error(`${label} failed (non-blocking):`, err);
+    }
+  } else {
+    promise.catch((err) => {
+      console.error(`${label} failed (non-blocking):`, err);
+    });
+  }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /api/admin/applications — List applications with filters
@@ -411,7 +434,29 @@ async function syncApprovedInstitutionsToBlockchain(req, res) {
 // ─────────────────────────────────────────────────────────────────────────────
 async function getStats(req, res) {
   try {
-    const [pendingCount, underReviewCount, approvedCount, rejectedCount, totalApps, recentApplications] = await Promise.all([
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfWeek = new Date(now);
+    startOfWeek.setDate(now.getDate() - 7);
+
+    const [
+      pendingCount,
+      underReviewCount,
+      approvedCount,
+      rejectedCount,
+      totalApps,
+      recentApplications,
+      totalCertificates,
+      issuedCertificates,
+      revokedCertificates,
+      certificatesThisMonth,
+      certificatesThisWeek,
+      emailsSent,
+      emailsFailed,
+      studentIds,
+      recentCertificates,
+      topInstitutions,
+    ] = await Promise.all([
       InstitutionApplication.countDocuments({ status: "pending" }),
       InstitutionApplication.countDocuments({ status: "under_review" }),
       InstitutionApplication.countDocuments({ status: "approved" }),
@@ -421,6 +466,31 @@ async function getStats(req, res) {
         .sort({ appliedDate: -1 })
         .limit(5)
         .select("institutionName walletAddress status country appliedDate"),
+      Certificate.countDocuments(),
+      Certificate.countDocuments({ status: "issued" }),
+      Certificate.countDocuments({ status: "revoked" }),
+      Certificate.countDocuments({ createdAt: { $gte: startOfMonth } }),
+      Certificate.countDocuments({ createdAt: { $gte: startOfWeek } }),
+      Certificate.countDocuments({ "email.sent": true }),
+      Certificate.countDocuments({ studentEmail: { $nin: [null, ""] }, "email.sent": false }),
+      Certificate.distinct("studentId", { studentId: { $nin: [null, ""] } }),
+      Certificate.find()
+        .sort({ createdAt: -1 })
+        .limit(8)
+        .select("certId studentName studentId institution degree status createdAt"),
+      Certificate.aggregate([
+        {
+          $group: {
+            _id: "$institution",
+            total: { $sum: 1 },
+            issued: { $sum: { $cond: [{ $eq: ["$status", "issued"] }, 1, 0] } },
+            revoked: { $sum: { $cond: [{ $eq: ["$status", "revoked"] }, 1, 0] } },
+          },
+        },
+        { $sort: { total: -1 } },
+        { $limit: 8 },
+        { $project: { _id: 0, institution: "$_id", total: 1, issued: 1, revoked: 1 } },
+      ]),
     ]);
 
     let blockchainStats = { totalCertificates: 0, totalInstitutions: 0, totalRevocations: 0 };
@@ -438,6 +508,21 @@ async function getStats(req, res) {
       rejected: rejectedCount,
       totalOnChainInstitutions: blockchainStats.totalInstitutions,
       recentApplications,
+      certificates: {
+        total: totalCertificates,
+        issued: issuedCertificates,
+        revoked: revokedCertificates,
+        issuedThisMonth: certificatesThisMonth,
+        issuedThisWeek: certificatesThisWeek,
+        emailsSent,
+        emailsFailed,
+        recent: recentCertificates,
+        topInstitutions,
+      },
+      students: {
+        total: studentIds.length,
+      },
+      blockchain: blockchainStats,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -513,6 +598,216 @@ async function serveDocument(req, res) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/certificates — List all certificates (filters: status, institution, search)
+// ─────────────────────────────────────────────────────────────────────────────
+async function listCertificates(req, res) {
+  try {
+    const { status, institution, search, page = 1, limit = 20 } = req.query;
+
+    const query = {};
+    if (status === "issued" || status === "revoked") query.status = status;
+    if (institution) query.institution = { $regex: escapeRegex(institution), $options: "i" };
+    if (search) {
+      const re = new RegExp(escapeRegex(search), "i");
+      query.$or = [
+        { certId: re },
+        { studentName: re },
+        { studentId: re },
+        { studentEmail: re },
+        { institution: re },
+        { degree: re },
+      ];
+    }
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const [certificates, total] = await Promise.all([
+      Certificate.find(query).sort({ createdAt: -1 }).skip(skip).limit(limitNum),
+      Certificate.countDocuments(query),
+    ]);
+
+    res.json({
+      certificates,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum) || 1,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/certificates/:certId — Full certificate record
+// ─────────────────────────────────────────────────────────────────────────────
+async function getCertificateDetails(req, res) {
+  try {
+    const { certId } = req.params;
+    const certificate = await Certificate.findOne({ certId });
+    if (!certificate) {
+      return res.status(404).json({ error: "Certificate not found" });
+    }
+    res.json({ certificate });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/admin/certificates/:certId/revoke — Admin-level revoke (any institution)
+// ─────────────────────────────────────────────────────────────────────────────
+async function revokeCertificate(req, res) {
+  try {
+    const { certId } = req.params;
+
+    const cert = await Certificate.findOne({ certId });
+    if (!cert) {
+      return res.status(404).json({ error: "Certificate not found" });
+    }
+    if (cert.status === "revoked") {
+      return res.status(409).json({ error: "Certificate is already revoked" });
+    }
+
+    const result = await blockchainService.revokeCertificate(certId);
+
+    const revokedAt = new Date();
+    await Certificate.updateOne(
+      { certId },
+      { status: "revoked", revokedAt, revokedBy: `admin:${req.adminAddress}` }
+    );
+
+    if (cert.studentEmail) {
+      await deliverEmail(
+        emailService.sendCertificateRevokedEmail({
+          to: cert.studentEmail,
+          studentName: cert.studentName,
+          studentId: cert.studentId,
+          certId,
+          degree: cert.degree,
+          institution: cert.institution,
+          revokedAt,
+        }),
+        "Admin revocation email send"
+      );
+    }
+
+    res.json({
+      success: true,
+      certId,
+      txHash: result.txHash,
+      blockNumber: result.blockNumber,
+      message: "Certificate revoked successfully",
+    });
+  } catch (err) {
+    console.error("Admin revoke certificate error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/students — Aggregate unique students across all institutions
+// ─────────────────────────────────────────────────────────────────────────────
+async function listStudents(req, res) {
+  try {
+    const { search, page = 1, limit = 20 } = req.query;
+
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+    const skip = (pageNum - 1) * limitNum;
+
+    const matchStage = { studentId: { $nin: [null, ""] } };
+    if (search) {
+      const re = new RegExp(escapeRegex(search), "i");
+      matchStage.$or = [{ studentId: re }, { studentName: re }, { studentEmail: re }];
+    }
+
+    const pipeline = [
+      { $match: matchStage },
+      {
+        $group: {
+          _id: { $toUpper: "$studentId" },
+          studentId: { $first: "$studentId" },
+          studentName: { $first: "$studentName" },
+          studentEmail: { $first: "$studentEmail" },
+          institutions: { $addToSet: "$institution" },
+          totalCertificates: { $sum: 1 },
+          issuedCount: { $sum: { $cond: [{ $eq: ["$status", "issued"] }, 1, 0] } },
+          revokedCount: { $sum: { $cond: [{ $eq: ["$status", "revoked"] }, 1, 0] } },
+          lastIssuedAt: { $max: "$createdAt" },
+        },
+      },
+      { $sort: { lastIssuedAt: -1 } },
+      {
+        $facet: {
+          students: [{ $skip: skip }, { $limit: limitNum }, { $project: { _id: 0 } }],
+          totalCount: [{ $count: "count" }],
+        },
+      },
+    ];
+
+    const [result] = await Certificate.aggregate(pipeline);
+    const students = result?.students || [];
+    const total = result?.totalCount?.[0]?.count || 0;
+
+    res.json({
+      students,
+      pagination: {
+        page: pageNum,
+        limit: limitNum,
+        total,
+        pages: Math.ceil(total / limitNum) || 1,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/students/:studentId — Full certificate history for a student
+// ─────────────────────────────────────────────────────────────────────────────
+async function getStudentDetails(req, res) {
+  try {
+    const { studentId } = req.params;
+    const re = new RegExp(`^${escapeRegex(studentId)}$`, "i");
+
+    const certificates = await Certificate.find({ studentId: re }).sort({ createdAt: -1 });
+
+    if (certificates.length === 0) {
+      return res.status(404).json({ error: "No certificates found for this student ID" });
+    }
+
+    const institutionMap = {};
+    for (const cert of certificates) {
+      if (!institutionMap[cert.institution]) {
+        institutionMap[cert.institution] = { name: cert.institution, count: 0 };
+      }
+      institutionMap[cert.institution].count += 1;
+    }
+
+    res.json({
+      studentId: certificates[0].studentId,
+      studentName: certificates[0].studentName,
+      studentEmail: certificates[0].studentEmail,
+      institutions: Object.values(institutionMap),
+      stats: {
+        total: certificates.length,
+        issued: certificates.filter((c) => c.status === "issued").length,
+        revoked: certificates.filter((c) => c.status === "revoked").length,
+      },
+      certificates,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
 module.exports = {
   listApplications,
   getApplicationDetails,
@@ -525,4 +820,9 @@ module.exports = {
   getStats,
   getVerificationReport,
   serveDocument,
+  listCertificates,
+  getCertificateDetails,
+  revokeCertificate,
+  listStudents,
+  getStudentDetails,
 };
