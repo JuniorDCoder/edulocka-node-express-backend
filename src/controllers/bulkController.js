@@ -285,6 +285,7 @@ async function processPipeline(job, templateName, sendEmails, walletAddress = nu
           certId: cert.certId,
           studentName: cert.studentName,
           studentId: cert.studentId || null,
+          studentEmail: cert.email || null,
           degree: cert.degree,
           institution: cert.institution,
           issueDate: new Date(cert.issueDate),
@@ -352,6 +353,7 @@ async function processPipeline(job, templateName, sendEmails, walletAddress = nu
       .map((c) => ({
         to: c.email,
         studentName: c.studentName,
+        studentId: c.studentId || null,
         certId: c.certId,
         degree: c.degree,
         institution: c.institution,

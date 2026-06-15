@@ -252,6 +252,7 @@ async function issueSingle(req, res) {
         certId,
         studentName,
         studentId,
+        studentEmail: email || null,
         degree,
         institution,
         issueDate: new Date(issueDate),
@@ -293,6 +294,7 @@ async function issueSingle(req, res) {
       emailService.sendCertificateEmail({
         to: email,
         studentName,
+        studentId,
         certId,
         degree,
         institution,
@@ -1172,10 +1174,26 @@ async function revokeSingle(req, res) {
 
     const result = await blockchainService.revokeCertificate(certId);
 
+    const revokedAt = new Date();
     await Certificate.updateOne(
       { certId },
-      { status: "revoked", revokedAt: new Date(), revokedBy: walletAddress }
+      { status: "revoked", revokedAt, revokedBy: walletAddress }
     );
+
+    // Notify the student by email (fire-and-forget — never fails the revocation)
+    if (cert.studentEmail) {
+      emailService.sendCertificateRevokedEmail({
+        to: cert.studentEmail,
+        studentName: cert.studentName,
+        studentId: cert.studentId,
+        certId,
+        degree: cert.degree,
+        institution: cert.institution,
+        revokedAt,
+      }).catch((emailErr) => {
+        console.error("Revocation email send failed (non-blocking):", emailErr);
+      });
+    }
 
     res.json({
       success: true,
@@ -1226,10 +1244,27 @@ async function bulkRevoke(req, res) {
           continue;
         }
         const txResult = await blockchainService.revokeCertificate(certId);
+        const revokedAt = new Date();
         await Certificate.updateOne(
           { certId },
-          { status: "revoked", revokedAt: new Date(), revokedBy: walletAddress }
+          { status: "revoked", revokedAt, revokedBy: walletAddress }
         );
+
+        // Notify the student by email (fire-and-forget — never fails the revocation)
+        if (cert.studentEmail) {
+          emailService.sendCertificateRevokedEmail({
+            to: cert.studentEmail,
+            studentName: cert.studentName,
+            studentId: cert.studentId,
+            certId,
+            degree: cert.degree,
+            institution: cert.institution,
+            revokedAt,
+          }).catch((emailErr) => {
+            console.error("Revocation email send failed (non-blocking):", emailErr);
+          });
+        }
+
         results.push({ certId, success: true, txHash: txResult.txHash });
       } catch (err) {
         results.push({ certId, success: false, error: err.message });

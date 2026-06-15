@@ -6,6 +6,7 @@ const certificateSchema = new mongoose.Schema({
   studentName: { type: String, required: true },
   studentWallet: { type: String, required: true, index: true },
   studentId: { type: String, default: null },
+  studentEmail: { type: String, default: null },
   degree: { type: String, required: true },
   institution: { type: String, required: true, index: true },
   issueDate: { type: Date, required: true },

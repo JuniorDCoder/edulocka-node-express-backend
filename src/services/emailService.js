@@ -14,11 +14,31 @@ const TEMPLATES_DIR = path.join(__dirname, "..", "..", "templates");
 
 // ── Create SMTP transporter ────────────────────────────────────────────────
 
-function createTransporter() {
+function getSmtpCredentials() {
   const host = process.env.SMTP_HOST;
   const port = parseInt(process.env.SMTP_PORT || "587");
-  const user = process.env.SMTP_USER;
-  const pass = process.env.SMTP_PASS;
+  const user = process.env.SMTP_USERNAME || process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASSWORD || process.env.SMTP_PASS;
+  const encryption = String(process.env.SMTP_ENCRYPTION || "").toLowerCase();
+  const secure = encryption === "ssl" ? true : encryption === "tls" ? false : port === 465;
+
+  return { host, port, user, pass, secure };
+}
+
+function getFromAddress() {
+  const address = process.env.SMTP_FROM_ADDRESS || process.env.SMTP_USERNAME || process.env.SMTP_USER;
+  const name = process.env.SMTP_FROM_NAME;
+  if (name) return `"${name}" <${address}>`;
+  return process.env.EMAIL_FROM || address;
+}
+
+function getPortalUrl() {
+  const base = (process.env.FRONTEND_URL || "http://localhost:3000").replace(/\/+$/, "");
+  return `${base}/student/login`;
+}
+
+function createTransporter() {
+  const { host, port, user, pass, secure } = getSmtpCredentials();
 
   if (!host || !user || !pass) {
     return null; // Email not configured
@@ -27,14 +47,15 @@ function createTransporter() {
   return nodemailer.createTransport({
     host,
     port,
-    secure: port === 465,
+    secure,
     auth: { user, pass },
     tls: { rejectUnauthorized: false },
   });
 }
 
 function isEmailConfigured() {
-  return !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+  const { host, user, pass } = getSmtpCredentials();
+  return !!(host && user && pass);
 }
 
 // ── Load email template ─────────────────────────────────────────────────────
@@ -65,6 +86,7 @@ function loadEmailTemplate() {
 async function sendCertificateEmail({
   to,
   studentName,
+  studentId,
   certId,
   degree,
   institution,
@@ -76,7 +98,7 @@ async function sendCertificateEmail({
   if (!transporter) {
     return {
       sent: false,
-      error: "Email not configured. Set SMTP_HOST, SMTP_USER, SMTP_PASS in .env",
+      error: "Email not configured. Set SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD in .env",
     };
   }
 
@@ -98,12 +120,14 @@ async function sendCertificateEmail({
 
   const html = template({
     studentName,
+    studentId: studentId || null,
     certId,
     degree,
     institution,
     issueDate: formattedDate,
     verifyUrl,
     qrDataUrl,
+    portalUrl: getPortalUrl(),
     currentYear: new Date().getFullYear(),
   });
 
@@ -129,7 +153,7 @@ async function sendCertificateEmail({
 
   try {
     const info = await transporter.sendMail({
-      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      from: getFromAddress(),
       to,
       subject: `🎓 Your ${degree} Certificate — ${institution}`,
       html,
@@ -147,6 +171,81 @@ async function sendCertificateEmail({
       to,
       error: err.message,
     };
+  }
+}
+
+// ── Send revocation notice email ────────────────────────────────────────────
+
+function loadRevocationTemplate() {
+  const templatePath = path.join(TEMPLATES_DIR, "email-certificate-revoked.html");
+  if (!fs.existsSync(templatePath)) {
+    return `
+      <div style="font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;padding:24px;">
+        <h2 style="color:#dc2626;">Certificate Revoked</h2>
+        <p>Dear <strong>{{studentName}}</strong>,</p>
+        <p>Your certificate <strong>{{certId}}</strong> ({{degree}}) issued by
+           <strong>{{institution}}</strong> has been revoked and is no longer valid.</p>
+        {{#if studentId}}<p><strong>Student ID:</strong> {{studentId}}</p>{{/if}}
+        <p>If you believe this is a mistake, please contact {{institution}} directly.</p>
+        <p>You can view all your certificates by logging into the student portal:</p>
+        <p><a href="{{portalUrl}}" style="color:#2563eb;">{{portalUrl}}</a></p>
+        <p>Best regards,<br/>Edulocka</p>
+      </div>
+    `;
+  }
+  return fs.readFileSync(templatePath, "utf8");
+}
+
+/**
+ * Notify a student that their certificate has been revoked.
+ * Never throws — callers should treat this as fire-and-forget.
+ */
+async function sendCertificateRevokedEmail({
+  to,
+  studentName,
+  studentId,
+  certId,
+  degree,
+  institution,
+  revokedAt,
+}) {
+  const transporter = createTransporter();
+  if (!transporter) {
+    return { sent: false, error: "Email not configured" };
+  }
+
+  if (!to) {
+    return { sent: false, error: "No recipient email on file" };
+  }
+
+  try {
+    const templateSource = loadRevocationTemplate();
+    const template = Handlebars.compile(templateSource);
+
+    const html = template({
+      studentName,
+      studentId: studentId || null,
+      certId,
+      degree,
+      institution,
+      revokedAt: revokedAt
+        ? new Date(revokedAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })
+        : new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" }),
+      verifyUrl: qrService.getVerifyUrl(certId),
+      portalUrl: getPortalUrl(),
+      currentYear: new Date().getFullYear(),
+    });
+
+    const info = await transporter.sendMail({
+      from: getFromAddress(),
+      to,
+      subject: `⚠️ Certificate Revoked — ${institution}`,
+      html,
+    });
+
+    return { sent: true, messageId: info.messageId, to };
+  } catch (err) {
+    return { sent: false, to, error: err.message };
   }
 }
 
@@ -274,7 +373,7 @@ async function sendInstitutionEmail(to, type, data) {
 
   try {
     const info = await transporter.sendMail({
-      from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+      from: getFromAddress(),
       to,
       subject: subjects[type] || "EduLocka Notification",
       html,
@@ -287,6 +386,7 @@ async function sendInstitutionEmail(to, type, data) {
 
 module.exports = {
   sendCertificateEmail,
+  sendCertificateRevokedEmail,
   bulkSendEmails,
   verifyConnection,
   isEmailConfigured,

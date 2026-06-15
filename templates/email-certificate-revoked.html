@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Your Certificate is Ready</title>
+  <title>Certificate Revoked</title>
 </head>
 <body style="margin:0;padding:0;background:#f4f5f7;font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
   <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f4f5f7;padding:32px 16px;">
@@ -27,9 +27,20 @@
                 Dear <strong style="color:#1a1a2e;">{{studentName}}</strong>,
               </p>
 
-              <p style="font-size:15px;color:#555;line-height:1.7;margin:0 0 24px;">
-                Congratulations! Your academic certificate has been officially issued and permanently recorded on the blockchain. This certificate is immutable and can be verified by anyone, anywhere, at any time.
-              </p>
+              <!-- Revoked banner -->
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#fef2f2;border-radius:8px;border:1px solid #fecaca;margin:0 0 24px;">
+                <tr>
+                  <td style="padding:16px 20px;">
+                    <p style="font-size:14px;color:#991b1b;margin:0;font-weight:700;">
+                      ⚠ This certificate has been revoked
+                    </p>
+                    <p style="font-size:13px;color:#b91c1c;margin:6px 0 0;line-height:1.6;">
+                      The certificate detailed below has been revoked by the issuing institution and is
+                      no longer considered valid. The revocation has been permanently recorded on the blockchain.
+                    </p>
+                  </td>
+                </tr>
+              </table>
 
               <!-- Certificate Details Card -->
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f8f9fb;border-radius:8px;border:1px solid #e8eaed;margin:0 0 24px;">
@@ -56,8 +67,8 @@
                       </tr>
                       <tr>
                         <td style="padding:6px 0;">
-                          <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;">Date of Issue</span><br/>
-                          <span style="font-size:14px;color:#1a1a2e;font-weight:600;">{{issueDate}}</span>
+                          <span style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;">Revoked On</span><br/>
+                          <span style="font-size:14px;color:#1a1a2e;font-weight:600;">{{revokedAt}}</span>
                         </td>
                       </tr>
                       {{#if studentId}}
@@ -73,34 +84,25 @@
                 </tr>
               </table>
 
-              <!-- QR Code -->
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;">
-                <tr>
-                  <td align="center">
-                    <p style="font-size:12px;color:#888;margin:0 0 8px;letter-spacing:1px;text-transform:uppercase;">Scan to Verify</p>
-                    <img src="cid:qrcode" alt="Verification QR Code" width="150" height="150" style="border:1px solid #e8eaed;border-radius:4px;padding:4px;background:#fff;" />
-                  </td>
-                </tr>
-              </table>
+              <p style="font-size:13px;color:#888;line-height:1.6;margin:0 0 16px;">
+                If you believe this revocation was made in error, please contact <strong>{{institution}}</strong> directly
+                for clarification. The current status of this certificate can always be verified online.
+              </p>
 
               <!-- Verify Button -->
               <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="margin:0 0 24px;">
                 <tr>
                   <td align="center">
                     <a href="{{verifyUrl}}" style="display:inline-block;background:#1a1a2e;color:#ffffff;font-size:14px;font-weight:600;text-decoration:none;padding:14px 36px;border-radius:6px;letter-spacing:0.5px;">
-                      Verify Certificate Online →
+                      Check Certificate Status →
                     </a>
                   </td>
                 </tr>
               </table>
 
-              <p style="font-size:13px;color:#888;line-height:1.6;margin:0 0 16px;">
-                Your certificate PDF is attached to this email. You can also share the verification link above with employers, institutions, or anyone who needs to confirm your credentials.
-              </p>
-
               {{#if portalUrl}}
               <!-- Student Portal Card -->
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;margin:0 0 24px;">
+              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe;margin:0 0 8px;">
                 <tr>
                   <td style="padding:20px 24px;text-align:center;">
                     <p style="font-size:13px;color:#1e3a8a;margin:0 0 4px;font-weight:600;">
@@ -116,20 +118,6 @@
                 </tr>
               </table>
               {{/if}}
-
-              <!-- Blockchain Info -->
-              <table role="presentation" cellpadding="0" cellspacing="0" width="100%" style="background:#f0fdf4;border-radius:6px;border:1px solid #bbf7d0;margin:0 0 20px;">
-                <tr>
-                  <td style="padding:16px;">
-                    <p style="font-size:12px;color:#166534;margin:0;font-weight:600;">
-                      ⛓ Recorded on Blockchain
-                    </p>
-                    <p style="font-size:11px;color:#15803d;margin:4px 0 0;line-height:1.5;">
-                      This certificate has been permanently and immutably recorded on the blockchain. It cannot be altered, forged, or deleted by anyone — not even the issuing institution.
-                    </p>
-                  </td>
-                </tr>
-              </table>
             </td>
           </tr>
 
