@@ -15,7 +15,26 @@ const emailService = require("../services/emailService");
 const aiTemplateService = require("../services/aiTemplateService");
 const templateStoreService = require("../services/templateStoreService");
 const { validateCertificate } = require("../utils/validator");
+const { isServerlessRuntime } = require("../utils/runtimePaths");
 const Certificate = require("../models/Certificate");
+
+// On serverless runtimes the function may be frozen/terminated immediately
+// after the response is sent, killing any un-awaited background work. Await
+// email delivery there; on long-lived servers, fire-and-forget as before.
+// Either way, failures are logged and never affect the caller's response.
+async function deliverEmail(promise, label) {
+  if (isServerlessRuntime()) {
+    try {
+      await promise;
+    } catch (err) {
+      console.error(`${label} failed (non-blocking):`, err);
+    }
+  } else {
+    promise.catch((err) => {
+      console.error(`${label} failed (non-blocking):`, err);
+    });
+  }
+}
 
 function sha256Hex(buffer) {
   return crypto.createHash("sha256").update(buffer).digest("hex");
@@ -289,21 +308,22 @@ async function issueSingle(req, res) {
       // For now, let's at least log it as ERROR and not WARN.
     }
 
-    // Send email if requested and configured (fire-and-forget, don't block response)
+    // Send email if requested and configured
     if (email && emailService.isEmailConfigured()) {
-      emailService.sendCertificateEmail({
-        to: email,
-        studentName,
-        studentId,
-        certId,
-        degree,
-        institution,
-        issueDate,
-        pdfBuffer: pdfResult.buffer,
-        pdfFileName: pdfResult.fileName,
-      }).catch((emailErr) => {
-        console.error("Email send failed (non-blocking):", emailErr);
-      });
+      await deliverEmail(
+        emailService.sendCertificateEmail({
+          to: email,
+          studentName,
+          studentId,
+          certId,
+          degree,
+          institution,
+          issueDate,
+          pdfBuffer: pdfResult.buffer,
+          pdfFileName: pdfResult.fileName,
+        }),
+        "Certificate email send"
+      );
     }
 
     res.json({
@@ -1180,19 +1200,20 @@ async function revokeSingle(req, res) {
       { status: "revoked", revokedAt, revokedBy: walletAddress }
     );
 
-    // Notify the student by email (fire-and-forget — never fails the revocation)
+    // Notify the student by email (never fails the revocation)
     if (cert.studentEmail) {
-      emailService.sendCertificateRevokedEmail({
-        to: cert.studentEmail,
-        studentName: cert.studentName,
-        studentId: cert.studentId,
-        certId,
-        degree: cert.degree,
-        institution: cert.institution,
-        revokedAt,
-      }).catch((emailErr) => {
-        console.error("Revocation email send failed (non-blocking):", emailErr);
-      });
+      await deliverEmail(
+        emailService.sendCertificateRevokedEmail({
+          to: cert.studentEmail,
+          studentName: cert.studentName,
+          studentId: cert.studentId,
+          certId,
+          degree: cert.degree,
+          institution: cert.institution,
+          revokedAt,
+        }),
+        "Revocation email send"
+      );
     }
 
     res.json({
@@ -1250,19 +1271,20 @@ async function bulkRevoke(req, res) {
           { status: "revoked", revokedAt, revokedBy: walletAddress }
         );
 
-        // Notify the student by email (fire-and-forget — never fails the revocation)
+        // Notify the student by email (never fails the revocation)
         if (cert.studentEmail) {
-          emailService.sendCertificateRevokedEmail({
-            to: cert.studentEmail,
-            studentName: cert.studentName,
-            studentId: cert.studentId,
-            certId,
-            degree: cert.degree,
-            institution: cert.institution,
-            revokedAt,
-          }).catch((emailErr) => {
-            console.error("Revocation email send failed (non-blocking):", emailErr);
-          });
+          await deliverEmail(
+            emailService.sendCertificateRevokedEmail({
+              to: cert.studentEmail,
+              studentName: cert.studentName,
+              studentId: cert.studentId,
+              certId,
+              degree: cert.degree,
+              institution: cert.institution,
+              revokedAt,
+            }),
+            "Revocation email send"
+          );
         }
 
         results.push({ certId, success: true, txHash: txResult.txHash });
