@@ -44,6 +44,8 @@ const certificateSchema = new mongoose.Schema({
   status: { type: String, enum: ["issued", "revoked"], default: "issued", index: true },
   revokedAt: { type: Date, default: null },
   revokedBy: { type: String, default: null },
+  revokedTxHash: { type: String, default: null },
+  revokedBlockNumber: { type: Number, default: null },
   
   createdAt: { type: Date, default: () => new Date(), index: true },
   updatedAt: { type: Date, default: () => new Date() },

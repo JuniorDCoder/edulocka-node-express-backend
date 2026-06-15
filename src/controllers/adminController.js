@@ -334,6 +334,10 @@ async function deauthorizeInstitution(req, res) {
         authorizedOnChain: false,
         reviewedDate: new Date(),
         reviewedBy: req.adminAddress,
+        deauthorizedAt: new Date(),
+        deauthorizedBy: req.adminAddress,
+        deauthorizedTxHash: txResult.txHash,
+        deauthorizedBlockNumber: txResult.blockNumber,
       }
     );
 
@@ -679,7 +683,13 @@ async function revokeCertificate(req, res) {
     const revokedAt = new Date();
     await Certificate.updateOne(
       { certId },
-      { status: "revoked", revokedAt, revokedBy: `admin:${req.adminAddress}` }
+      {
+        status: "revoked",
+        revokedAt,
+        revokedBy: `admin:${req.adminAddress}`,
+        revokedTxHash: result.txHash,
+        revokedBlockNumber: result.blockNumber,
+      }
     );
 
     if (cert.studentEmail) {
@@ -808,6 +818,137 @@ async function getStudentDetails(req, res) {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/admin/transactions — Unified, platform-wide on-chain transaction feed
+// ─────────────────────────────────────────────────────────────────────────────
+// Aggregates every on-chain transaction the backend has recorded — certificate
+// issuance/revocation and institution authorization/deauthorization — along
+// with the wallets/users involved, so the admin can audit everything and jump
+// to Etherscan. Built from existing collections; no separate ledger needed.
+const TRANSACTION_TYPES = [
+  "certificate_issued",
+  "certificate_revoked",
+  "institution_authorized",
+  "institution_deauthorized",
+];
+
+async function listTransactions(req, res) {
+  try {
+    const { type, search, page = 1, limit = 20 } = req.query;
+    const pageNum = Math.max(1, parseInt(page, 10) || 1);
+    const limitNum = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+
+    const [certs, applications] = await Promise.all([
+      Certificate.find()
+        .select(
+          "certId studentName studentId studentWallet institution status blockchain revokedAt revokedBy revokedTxHash revokedBlockNumber createdAt"
+        )
+        .sort({ createdAt: -1 })
+        .limit(2000)
+        .lean(),
+      InstitutionApplication.find({
+        $or: [{ blockchainTxHash: { $ne: null } }, { deauthorizedTxHash: { $ne: null } }],
+      })
+        .select(
+          "institutionName walletAddress blockchainTxHash reviewedDate reviewedBy deauthorizedAt deauthorizedBy deauthorizedTxHash deauthorizedBlockNumber createdAt"
+        )
+        .lean(),
+    ]);
+
+    const transactions = [];
+
+    for (const cert of certs) {
+      if (cert.blockchain?.txHash) {
+        transactions.push({
+          type: "certificate_issued",
+          txHash: cert.blockchain.txHash,
+          blockNumber: cert.blockchain.blockNumber ?? null,
+          timestamp: cert.blockchain.issuedAt || cert.createdAt,
+          certId: cert.certId,
+          studentName: cert.studentName,
+          studentId: cert.studentId,
+          studentWallet: cert.studentWallet,
+          institution: cert.institution,
+        });
+      }
+      if (cert.status === "revoked" && cert.revokedTxHash) {
+        transactions.push({
+          type: "certificate_revoked",
+          txHash: cert.revokedTxHash,
+          blockNumber: cert.revokedBlockNumber ?? null,
+          timestamp: cert.revokedAt || cert.createdAt,
+          certId: cert.certId,
+          studentName: cert.studentName,
+          studentId: cert.studentId,
+          studentWallet: cert.studentWallet,
+          institution: cert.institution,
+          actor: cert.revokedBy,
+        });
+      }
+    }
+
+    for (const app of applications) {
+      if (app.blockchainTxHash) {
+        transactions.push({
+          type: "institution_authorized",
+          txHash: app.blockchainTxHash,
+          blockNumber: null,
+          timestamp: app.reviewedDate || app.createdAt,
+          institution: app.institutionName,
+          walletAddress: app.walletAddress,
+          actor: app.reviewedBy,
+        });
+      }
+      if (app.deauthorizedTxHash) {
+        transactions.push({
+          type: "institution_deauthorized",
+          txHash: app.deauthorizedTxHash,
+          blockNumber: app.deauthorizedBlockNumber ?? null,
+          timestamp: app.deauthorizedAt || app.createdAt,
+          institution: app.institutionName,
+          walletAddress: app.walletAddress,
+          actor: app.deauthorizedBy,
+        });
+      }
+    }
+
+    let filtered = transactions;
+
+    if (type && TRANSACTION_TYPES.includes(type)) {
+      filtered = filtered.filter((t) => t.type === type);
+    }
+
+    if (search) {
+      const re = new RegExp(escapeRegex(search), "i");
+      filtered = filtered.filter((t) =>
+        [t.certId, t.studentName, t.studentId, t.studentWallet, t.institution, t.walletAddress, t.txHash, t.actor]
+          .filter(Boolean)
+          .some((field) => re.test(String(field)))
+      );
+    }
+
+    filtered.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+    const total = filtered.length;
+    const pages = Math.max(1, Math.ceil(total / limitNum));
+    const start = (pageNum - 1) * limitNum;
+    const pageItems = filtered.slice(start, start + limitNum);
+
+    res.json({
+      transactions: pageItems,
+      pagination: { page: pageNum, limit: limitNum, total, pages },
+      counts: {
+        certificate_issued: transactions.filter((t) => t.type === "certificate_issued").length,
+        certificate_revoked: transactions.filter((t) => t.type === "certificate_revoked").length,
+        institution_authorized: transactions.filter((t) => t.type === "institution_authorized").length,
+        institution_deauthorized: transactions.filter((t) => t.type === "institution_deauthorized").length,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+
 module.exports = {
   listApplications,
   getApplicationDetails,
@@ -825,4 +966,5 @@ module.exports = {
   revokeCertificate,
   listStudents,
   getStudentDetails,
+  listTransactions,
 };

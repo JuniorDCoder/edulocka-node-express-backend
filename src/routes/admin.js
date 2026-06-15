@@ -99,6 +99,12 @@ router.get("/students", adminController.listStudents);
 // Full certificate history for a single student
 router.get("/students/:studentId", adminController.getStudentDetails);
 
+// ── Transactions (platform-wide on-chain activity feed) ──────────────────────
+
+// List all on-chain transactions (issue/revoke/authorize/deauthorize), with
+// involved users/institutions (?type=&search=&page=1)
+router.get("/transactions", adminController.listTransactions);
+
 // ── Blog Management ─────────────────────────────────────────────────────────
 /**
  * @openapi

@@ -123,6 +123,24 @@ const institutionApplicationSchema = new mongoose.Schema(
       default: false,
     },
 
+    // ── Blockchain Deauthorization ──────────────────────────────────────────
+    deauthorizedAt: {
+      type: Date,
+      default: null,
+    },
+    deauthorizedBy: {
+      type: String, // Admin wallet address who deauthorized
+      default: null,
+    },
+    deauthorizedTxHash: {
+      type: String,
+      default: null,
+    },
+    deauthorizedBlockNumber: {
+      type: Number,
+      default: null,
+    },
+
     // ── Admin Notes ───────────────────────────────────────────────────────
     adminNotes: {
       type: String,

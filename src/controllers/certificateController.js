@@ -1197,7 +1197,13 @@ async function revokeSingle(req, res) {
     const revokedAt = new Date();
     await Certificate.updateOne(
       { certId },
-      { status: "revoked", revokedAt, revokedBy: walletAddress }
+      {
+        status: "revoked",
+        revokedAt,
+        revokedBy: walletAddress,
+        revokedTxHash: result.txHash,
+        revokedBlockNumber: result.blockNumber,
+      }
     );
 
     // Notify the student by email (never fails the revocation)
@@ -1268,7 +1274,13 @@ async function bulkRevoke(req, res) {
         const revokedAt = new Date();
         await Certificate.updateOne(
           { certId },
-          { status: "revoked", revokedAt, revokedBy: walletAddress }
+          {
+            status: "revoked",
+            revokedAt,
+            revokedBy: walletAddress,
+            revokedTxHash: txResult.txHash,
+            revokedBlockNumber: txResult.blockNumber,
+          }
         );
 
         // Notify the student by email (never fails the revocation)
