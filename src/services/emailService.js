@@ -341,7 +341,7 @@ async function sendInstitutionEmail({ to, type, data = {} }) {
     rejected: `❌ Application Not Approved — ${data.institutionName}`,
   };
 
-  const templateFile = `institution-${type}.html`;
+  const templateFile = `email-institution-${type}.html`;
   let templateSource = loadInstitutionTemplate(templateFile);
 
   // Fallback inline templates (used only if the HTML files under backend/templates are missing)
