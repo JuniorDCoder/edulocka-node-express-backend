@@ -14,6 +14,7 @@ const mongoose = require("mongoose");
 const { ethers } = require("ethers");
 
 const { connectMongo, mongoStateLabel } = require("./db/mongo");
+const { ensureDbConnected } = require("./middleware/dbMiddleware");
 let swaggerUi = null;
 let buildOpenApiSpec = null;
 try {
@@ -111,6 +112,7 @@ const limiter = rateLimit({
   message: { error: "Too many requests, please try again later." },
 });
 app.use("/api", limiter);
+app.use("/api", ensureDbConnected);
 
 // Serve generated files (PDFs, QR codes)
 app.use(
