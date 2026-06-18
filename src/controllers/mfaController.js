@@ -1,5 +1,5 @@
 const crypto = require("crypto");
-const { authenticator } = require("otplib");
+const OTPAuth = require("otpauth");
 const StudentMFA = require("../models/StudentMFA");
 const Certificate = require("../models/Certificate");
 const { signStudentToken } = require("../middleware/studentAuthMiddleware");
@@ -41,12 +41,17 @@ async function setupAuthenticator(req, res) {
     const { studentId, institutions, studentName } = req.student;
     const institution = institutions[0] || "";
 
-    const secret = authenticator.generateSecret();
-    const otpauth = authenticator.keyuri(
-      studentId,
-      `Edulocka (${institution})`,
-      secret
-    );
+    const secretHex = crypto.randomBytes(20).toString("hex");
+    const totp = new OTPAuth.TOTP({
+      issuer: `Edulocka (${institution})`,
+      label: studentId,
+      algorithm: "SHA1",
+      digits: 6,
+      period: 30,
+      secret: OTPAuth.Secret.fromHex(secretHex),
+    });
+    const secret = totp.secret.base32;
+    const otpauth = totp.toString();
 
     let mfa = await StudentMFA.findOne({ studentId, institution });
     if (!mfa) {
@@ -84,10 +89,13 @@ async function verifyAuthenticator(req, res) {
       return res.status(400).json({ error: "Authenticator not set up. Please set it up first." });
     }
 
-    const isValid = authenticator.verify({
-      token: String(code).replace(/\s/g, ""),
-      secret: mfa.totp.secret,
+    const totp = new OTPAuth.TOTP({
+      algorithm: "SHA1",
+      digits: 6,
+      period: 30,
+      secret: OTPAuth.Secret.fromBase32(mfa.totp.secret),
     });
+    const isValid = totp.validate({ token: String(code).replace(/\s/g, ""), window: 1 }) !== null;
 
     if (!isValid) {
       return res.status(400).json({ error: "Invalid code. Please try again." });
