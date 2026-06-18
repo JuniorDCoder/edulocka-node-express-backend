@@ -409,6 +409,41 @@ async function sendInstitutionEmail({ to, type, data = {} }) {
   }
 }
 
+// ── Send MFA verification code ─────────────────────────────────────────────
+
+async function sendMfaCodeEmail({ to, code, studentName }) {
+  const transporter = createTransporter();
+  if (!transporter) {
+    return { sent: false, error: "Email not configured" };
+  }
+
+  const html = `
+    <div style="font-family:system-ui,sans-serif;max-width:480px;margin:0 auto;padding:32px;">
+      <div style="text-align:center;margin-bottom:24px;">
+        <div style="display:inline-block;background:#111827;color:#fff;padding:8px 16px;border-radius:4px;font-size:13px;font-weight:600;letter-spacing:0.5px;">EDULOCKA</div>
+      </div>
+      <h2 style="color:#111827;margin:0 0 8px;font-size:20px;">Your Verification Code</h2>
+      <p style="color:#374151;margin:0 0 24px;font-size:14px;">Hi <strong>${studentName}</strong>, use the code below to complete your login.</p>
+      <div style="background:#f3f4f6;border:2px dashed #d1d5db;border-radius:8px;padding:20px;text-align:center;margin-bottom:24px;">
+        <span style="font-family:monospace;font-size:32px;font-weight:700;letter-spacing:6px;color:#111827;">${code}</span>
+      </div>
+      <p style="color:#6b7280;font-size:13px;margin:0;">This code expires in <strong>10 minutes</strong>. If you did not request this code, you can safely ignore this email.</p>
+    </div>
+  `;
+
+  try {
+    const info = await transporter.sendMail({
+      from: getFromAddress(),
+      to,
+      subject: `${code} — Your Edulocka verification code`,
+      html,
+    });
+    return { sent: true, messageId: info.messageId, to };
+  } catch (err) {
+    return { sent: false, to, error: err.message };
+  }
+}
+
 module.exports = {
   sendCertificateEmail,
   sendCertificateRevokedEmail,
@@ -416,4 +451,5 @@ module.exports = {
   verifyConnection,
   isEmailConfigured,
   sendInstitutionEmail,
+  sendMfaCodeEmail,
 };

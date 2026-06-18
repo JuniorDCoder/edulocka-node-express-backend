@@ -1,4 +1,5 @@
 const Certificate = require("../models/Certificate");
+const StudentMFA = require("../models/StudentMFA");
 const { signStudentToken } = require("../middleware/studentAuthMiddleware");
 
 // POST /api/student/login
@@ -38,6 +39,30 @@ async function login(req, res) {
     const institutions = Object.values(institutionMap);
     const studentName = certificates[0].studentName;
 
+    // Check if MFA is enabled for this student+institution
+    const selectedInstitution = institutionName || institutions[0]?.name;
+    if (selectedInstitution) {
+      const mfa = await StudentMFA.findOne({
+        studentId: { $regex: new RegExp(`^${escapeRegex(normalizedId)}$`, "i") },
+        institution: { $regex: new RegExp(escapeRegex(String(selectedInstitution).trim()), "i") },
+        mfaEnabled: true,
+      }).lean();
+
+      if (mfa) {
+        return res.json({
+          success: true,
+          mfaRequired: true,
+          mfaMethod: mfa.mfaMethod,
+          student: {
+            studentId: normalizedId,
+            studentName,
+            institutions,
+            totalCertificates: certificates.length,
+          },
+        });
+      }
+    }
+
     const token = signStudentToken({
       studentId: normalizedId,
       studentName,
@@ -46,6 +71,7 @@ async function login(req, res) {
 
     return res.json({
       success: true,
+      mfaRequired: false,
       token,
       student: {
         studentId: normalizedId,
