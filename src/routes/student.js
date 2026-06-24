@@ -12,5 +12,6 @@ router.post("/login", studentController.login);
 // Protected — requires valid student JWT
 router.get("/certificates", requireStudentAuth, studentController.getCertificates);
 router.get("/profile", requireStudentAuth, studentController.getProfile);
+router.post("/change-passphrase", requireStudentAuth, studentController.changePassphrase);
 
 module.exports = router;

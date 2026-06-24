@@ -1,12 +1,13 @@
 const Certificate = require("../models/Certificate");
 const StudentMFA = require("../models/StudentMFA");
+const StudentAccount = require("../models/StudentAccount");
 const { signStudentToken } = require("../middleware/studentAuthMiddleware");
 
 // POST /api/student/login
-// Body: { studentId, institutionName? }
+// Body: { studentId, institutionName?, passphrase? }
 async function login(req, res) {
   try {
-    const { studentId, institutionName } = req.body;
+    const { studentId, institutionName, passphrase } = req.body;
 
     if (!studentId || !String(studentId).trim()) {
       return res.status(400).json({ error: "studentId is required" });
@@ -27,7 +28,6 @@ async function login(req, res) {
       });
     }
 
-    // Build institution list from found certs
     const institutionMap = {};
     for (const cert of certificates) {
       if (!institutionMap[cert.institution]) {
@@ -39,7 +39,60 @@ async function login(req, res) {
     const institutions = Object.values(institutionMap);
     const studentName = certificates[0].studentName;
 
-    // Check if MFA is enabled for this student+institution
+    // Check if this student has a passphrase set
+    const account = await StudentAccount.findOne({
+      studentId: { $regex: new RegExp(`^${escapeRegex(normalizedId)}$`, "i") },
+    });
+
+    if (account) {
+      // Account exists — passphrase is required
+      if (!passphrase) {
+        return res.json({
+          success: true,
+          passphraseRequired: true,
+          hasAccount: true,
+          student: {
+            studentId: normalizedId,
+            studentName,
+            institutions,
+            totalCertificates: certificates.length,
+          },
+        });
+      }
+
+      if (!account.verifyPassphrase(String(passphrase))) {
+        return res.status(401).json({ error: "Incorrect passphrase." });
+      }
+    } else {
+      // No account — prompt to create a passphrase
+      if (!passphrase) {
+        return res.json({
+          success: true,
+          passphraseRequired: true,
+          hasAccount: false,
+          student: {
+            studentId: normalizedId,
+            studentName,
+            institutions,
+            totalCertificates: certificates.length,
+          },
+        });
+      }
+
+      // Creating new passphrase
+      if (String(passphrase).length < 6) {
+        return res.status(400).json({ error: "Passphrase must be at least 6 characters." });
+      }
+
+      const { hash, salt } = StudentAccount.hashPassphrase(String(passphrase));
+      await StudentAccount.create({
+        studentId: normalizedId,
+        passphraseHash: hash,
+        salt,
+      });
+    }
+
+    // Passphrase verified or just created — check MFA
     const selectedInstitution = institutionName || institutions[0]?.name;
     if (selectedInstitution) {
       const mfa = await StudentMFA.findOne({
@@ -86,19 +139,54 @@ async function login(req, res) {
   }
 }
 
+// POST /api/student/change-passphrase
+async function changePassphrase(req, res) {
+  try {
+    const { studentId } = req.student;
+    const { currentPassphrase, newPassphrase } = req.body;
+
+    if (!currentPassphrase || !newPassphrase) {
+      return res.status(400).json({ error: "Current and new passphrase are required." });
+    }
+
+    if (String(newPassphrase).length < 6) {
+      return res.status(400).json({ error: "New passphrase must be at least 6 characters." });
+    }
+
+    const account = await StudentAccount.findOne({
+      studentId: { $regex: new RegExp(`^${escapeRegex(studentId)}$`, "i") },
+    });
+
+    if (!account) {
+      return res.status(400).json({ error: "No account found." });
+    }
+
+    if (!account.verifyPassphrase(String(currentPassphrase))) {
+      return res.status(401).json({ error: "Current passphrase is incorrect." });
+    }
+
+    const { hash, salt } = StudentAccount.hashPassphrase(String(newPassphrase));
+    account.passphraseHash = hash;
+    account.salt = salt;
+    await account.save();
+
+    res.json({ success: true, message: "Passphrase updated." });
+  } catch (err) {
+    console.error("Student changePassphrase error:", err);
+    res.status(500).json({ error: err.message });
+  }
+}
+
 // GET /api/student/certificates
-// Requires student JWT. Returns all issued certificates for this student.
 async function getCertificates(req, res) {
   try {
     const { studentId, institutions } = req.student;
     const query = { studentId: { $regex: new RegExp(`^${escapeRegex(studentId)}$`, "i") } };
 
-    // Optionally filter by institution if provided as query param
     const { institution, status } = req.query;
     if (institution) {
       query.institution = { $regex: new RegExp(escapeRegex(String(institution).trim()), "i") };
     } else if (institutions && institutions.length > 0) {
-      // Scope to only the institutions the student has certs at
       query.institution = { $in: institutions };
     }
 
@@ -138,7 +226,6 @@ async function getCertificates(req, res) {
 }
 
 // GET /api/student/profile
-// Returns student identity derived from their certificates.
 async function getProfile(req, res) {
   try {
     const { studentId, studentName, institutions } = req.student;
@@ -165,15 +252,11 @@ async function getProfile(req, res) {
   }
 }
 
-// Helper: escape special regex chars
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // GET /api/student/lookup?studentId=xxx
-// Public — validates a student ID and returns the institutions that have issued
-// certificates to it. Used to populate the institution dropdown on the login page
-// so students can only select an institution that has actually issued to them.
 async function lookupStudent(req, res) {
   try {
     const { studentId } = req.query;
@@ -207,12 +290,18 @@ async function lookupStudent(req, res) {
       a.name.localeCompare(b.name)
     );
 
+    // Check if this student already has an account (passphrase set)
+    const hasAccount = await StudentAccount.exists({
+      studentId: { $regex: new RegExp(`^${escapeRegex(normalizedId)}$`, "i") },
+    });
+
     return res.json({
       found: true,
       studentId: normalizedId,
       studentName: certs[0].studentName,
       institutions,
       total: certs.reduce((sum, _) => sum + 1, 0),
+      hasAccount: !!hasAccount,
     });
   } catch (err) {
     console.error("Student lookupStudent error:", err);
@@ -220,4 +309,4 @@ async function lookupStudent(req, res) {
   }
 }
 
-module.exports = { login, lookupStudent, getCertificates, getProfile };
+module.exports = { login, lookupStudent, getCertificates, getProfile, changePassphrase };

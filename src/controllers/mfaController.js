@@ -19,7 +19,14 @@ async function getStatus(req, res) {
     const { studentId, institutions } = req.student;
     const institution = institutions[0] || "";
 
-    const mfa = await StudentMFA.findOne({ studentId, institution }).lean();
+    const [mfa, certWithEmail] = await Promise.all([
+      StudentMFA.findOne({ studentId, institution }).lean(),
+      Certificate.findOne({
+        studentId: { $regex: new RegExp(`^${escapeRegex(studentId)}$`, "i") },
+        institution: { $regex: new RegExp(escapeRegex(institution), "i") },
+        studentEmail: { $ne: null, $exists: true },
+      }).select("studentEmail").lean(),
+    ]);
 
     res.json({
       mfaEnabled: mfa?.mfaEnabled || false,
@@ -27,7 +34,8 @@ async function getStatus(req, res) {
       hasAuthenticator: !!(mfa?.totp?.secret && mfa?.totp?.verified),
       hasPin: !!mfa?.pin?.hash,
       hasEmail: !!mfa?.emailOtp?.email,
-      email: mfa?.emailOtp?.email || null,
+      email: mfa?.emailOtp?.email ? maskEmail(mfa.emailOtp.email) : null,
+      emailAvailable: !!certWithEmail?.studentEmail,
     });
   } catch (err) {
     console.error("MFA getStatus error:", err);
@@ -142,20 +150,29 @@ async function setupPin(req, res) {
 }
 
 // POST /api/student/mfa/setup/email
+// Uses the email set by the institution when issuing the certificate — students cannot choose an arbitrary email.
 async function setupEmail(req, res) {
   try {
-    const { studentId, institutions } = req.student;
+    const { studentId, institutions, studentName } = req.student;
     const institution = institutions[0] || "";
-    const { email } = req.body;
-
-    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return res.status(400).json({ error: "Valid email address is required." });
-    }
 
     if (!isEmailConfigured()) {
       return res.status(503).json({ error: "Email service is not configured on this server." });
     }
 
+    const cert = await Certificate.findOne({
+      studentId: { $regex: new RegExp(`^${escapeRegex(studentId)}$`, "i") },
+      institution: { $regex: new RegExp(escapeRegex(institution), "i") },
+      studentEmail: { $ne: null, $exists: true },
+    }).select("studentEmail").sort({ createdAt: -1 }).lean();
+
+    if (!cert?.studentEmail) {
+      return res.status(400).json({
+        error: "No email address is on file for your certificates. Your institution must include an email when issuing certificates for email MFA to be available.",
+      });
+    }
+
+    const email = cert.studentEmail;
     const code = generateOtpCode();
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
 
@@ -171,7 +188,8 @@ async function setupEmail(req, res) {
 
     res.json({
       success: true,
-      message: "Verification code sent to your email. Enter it to enable MFA.",
+      emailHint: maskEmail(email),
+      message: "Verification code sent to the email your institution has on file.",
     });
   } catch (err) {
     console.error("MFA setupEmail error:", err);
@@ -316,10 +334,13 @@ async function loginVerify(req, res) {
     let verified = false;
 
     if (mfa.mfaMethod === "authenticator") {
-      verified = authenticator.verify({
-        token: String(code).replace(/\s/g, ""),
-        secret: mfa.totp.secret,
+      const totp = new OTPAuth.TOTP({
+        algorithm: "SHA1",
+        digits: 6,
+        period: 30,
+        secret: OTPAuth.Secret.fromBase32(mfa.totp.secret),
       });
+      verified = totp.validate({ token: String(code).replace(/\s/g, ""), window: 1 }) !== null;
     } else if (mfa.mfaMethod === "pin") {
       verified = hashPin(code) === mfa.pin.hash;
     } else if (mfa.mfaMethod === "email") {
